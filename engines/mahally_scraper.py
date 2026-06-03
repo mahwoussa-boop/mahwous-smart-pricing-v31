@@ -348,9 +348,41 @@ class MahallyScraper:
                 gender TEXT DEFAULT '',
                 added_at TEXT DEFAULT (datetime('now','localtime')),
                 updated_at TEXT DEFAULT (datetime('now','localtime')),
+                first_seen_at TEXT DEFAULT (datetime('now','localtime')),
+                rating_count INTEGER DEFAULT 0,
+                discount_pct REAL DEFAULT 0,
+                original_price REAL DEFAULT 0,
+                category TEXT DEFAULT '',
+                sku TEXT DEFAULT '',
                 UNIQUE(competitor, norm_name)
             )
         """)
+        # إضافة أعمدة جديدة إذا لم تكن موجودة (ترقية DB)
+        for col_def in [
+            ("first_seen_at", "TEXT DEFAULT (datetime('now','localtime'))"),
+            ("rating_count", "INTEGER DEFAULT 0"),
+            ("discount_pct", "REAL DEFAULT 0"),
+            ("original_price", "REAL DEFAULT 0"),
+            ("category", "TEXT DEFAULT ''"),
+            ("sku", "TEXT DEFAULT ''"),
+        ]:
+            try:
+                cur.execute(f"ALTER TABLE competitor_products_store ADD COLUMN {col_def[0]} {col_def[1]}")
+            except sqlite3.OperationalError:
+                pass  # العمود موجود مسبقاً
+
+        # إضافة فهارس لتسريع البحث
+        for idx_sql in [
+            "CREATE INDEX IF NOT EXISTS idx_cps_competitor ON competitor_products_store(competitor)",
+            "CREATE INDEX IF NOT EXISTS idx_cps_brand ON competitor_products_store(brand)",
+            "CREATE INDEX IF NOT EXISTS idx_cps_price ON competitor_products_store(price)",
+            "CREATE INDEX IF NOT EXISTS idx_cps_first_seen ON competitor_products_store(first_seen_at)",
+            "CREATE INDEX IF NOT EXISTS idx_cps_rating ON competitor_products_store(rating_count)",
+        ]:
+            try:
+                cur.execute(idx_sql)
+            except sqlite3.OperationalError:
+                pass
 
         saved = 0
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -377,13 +409,23 @@ class MahallyScraper:
                                product_url=COALESCE(NULLIF(?,''),
                                    (SELECT product_url FROM competitor_products_store WHERE id=?)),
                                brand=COALESCE(NULLIF(?,''),
-                                   (SELECT brand FROM competitor_products_store WHERE id=?))
+                                   (SELECT brand FROM competitor_products_store WHERE id=?)),
+                               rating_count=?, discount_pct=?, original_price=?,
+                               category=COALESCE(NULLIF(?,''),
+                                   (SELECT category FROM competitor_products_store WHERE id=?)),
+                               sku=COALESCE(NULLIF(?,''),
+                                   (SELECT sku FROM competitor_products_store WHERE id=?))
                            WHERE id=?""",
                         (
                             p["price"], now,
                             p.get("image", ""), row_id,
                             p.get("url", ""), row_id,
                             p.get("brand", ""), row_id,
+                            p.get("rating_count", 0),
+                            p.get("discount_pct", 0),
+                            p.get("original_price", 0),
+                            p.get("category", ""), row_id,
+                            p.get("sku", ""), row_id,
                             row_id,
                         ),
                     )
@@ -392,12 +434,19 @@ class MahallyScraper:
                         """INSERT INTO competitor_products_store
                            (competitor, product_name, norm_name, price,
                             image_url, product_url, brand, size, gender,
-                            added_at, updated_at)
-                           VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                            added_at, updated_at, first_seen_at,
+                            rating_count, discount_pct, original_price,
+                            category, sku)
+                           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                         (
                             competitor_name, name, norm, p["price"],
                             p.get("image", ""), p.get("url", ""),
-                            p.get("brand", ""), "", "", now, now,
+                            p.get("brand", ""), "", "", now, now, now,
+                            p.get("rating_count", 0),
+                            p.get("discount_pct", 0),
+                            p.get("original_price", 0),
+                            p.get("category", ""),
+                            p.get("sku", ""),
                         ),
                     )
                 saved += 1
@@ -848,6 +897,8 @@ class MahallyScraper:
                 "availability": availability,
                 "sku": sku,
                 "description": description[:500] if description else "",
+                "rating_count": int(hit.get("rating_count", 0) or 0),
+                "discount_pct": round(float(discount), 2),
             }
         except Exception as e:
             log.debug("خطأ في تحليل hit: %s", e)

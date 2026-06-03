@@ -28,7 +28,6 @@ import re
 from urllib.parse import urlparse
 import streamlit as st
 import pandas as pd
-import threading
 import time
 import uuid
 from functools import partial
@@ -48,6 +47,7 @@ from config import *
 SECTIONS = [
     "✨ مصنع المنتجات",
     "📊 لوحة التحكم",
+    "🧠 ذكاء المنافسين",
     "🔴 سعر أعلى",
     "🟢 سعر أقل",
     "✅ موافق عليها",
@@ -3138,6 +3138,18 @@ if page == "📊 لوحة التحكم":
                     prog.progress(1.0, "✅ اكتمل!")
                     st.balloons()
                     st.rerun()
+
+# ════════════════════════════════════════════════
+#  1.5 ذكاء المنافسين (v31)
+# ════════════════════════════════════════════════
+elif page == "🧠 ذكاء المنافسين":
+    try:
+        from pages.competitor_intelligence_page import render_competitor_intelligence
+        render_competitor_intelligence()
+    except Exception as _ci_err:
+        st.error(f"❌ خطأ في تحميل ذكاء المنافسين: {_ci_err}")
+        import traceback
+        st.code(traceback.format_exc())
 
 
 # ════════════════════════════════════════════════

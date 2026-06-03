@@ -801,8 +801,8 @@ MAHWOUS_SALLA_PROMPT = """أنت خبير آلي متخصص في كتابة أو
 (6-8 أسئلة إلزامية تشمل: الاستخدام اليومي، الثبات، الفصل المناسب، المناسبات الرسمية)
 
 **اكتشف المزيد من مهووس**
-* [رابط بناءً على التصنيف]
-* [رابط بناءً على الماركة]
+* [رابط التصنيف — استخدم {{CATEGORY_URL}} إذا تم تمريره، وإلا اكتب https://mahwous.com]
+* [رابط الماركة — استخدم {{BRAND_URL}} إذا تم تمريره، وإلا اكتب https://mahwous.com/brands]
 * [رابط للتستر أو البدائل]
 عالمك العطري يبدأ من مهووس!
 
@@ -910,11 +910,41 @@ def generate_mahwous_description(product_name, price, fragrantica_data=None, ext
     if extra_info:
         extra = f"\nمعلومات إضافية: {extra_info}"
 
+    # ── روابط حقيقية من mahwous.com ─────────────────────────────────────
+    brand_url = "https://mahwous.com/brands"
+    category_url = "https://mahwous.com"
+    try:
+        from utils.mahwous_links import lookup_brand_url, lookup_category_url_for_perfume
+        _brand_name = ""
+        if fragrantica_data and fragrantica_data.get("brand"):
+            _brand_name = fragrantica_data["brand"]
+        elif extra_info:
+            _brand_name = str(extra_info)
+        _bu = lookup_brand_url(_brand_name or product_name)
+        if _bu:
+            brand_url = _bu
+        # كشف الجنس من اسم المنتج
+        _gender = ""
+        _pn_lower = product_name.lower()
+        if any(w in _pn_lower for w in ("نسائي", "نساء", "women", "femme", "lady")):
+            _gender = "نسائي"
+        elif any(w in _pn_lower for w in ("رجالي", "رجال", "men", "homme")):
+            _gender = "رجالي"
+        _cu = lookup_category_url_for_perfume(_gender)
+        if _cu:
+            category_url = _cu
+    except Exception:
+        pass
+
     prompt = f"""اكتب وصفاً كاملاً للعطر وفق التعليمات والهيكل أعلاه (العنوان الجذاب ثم الأقسام 1–7).
 
 **اسم المنتج:** {product_name}
 **السعر المرجعي للبيع:** {price:.0f} ريال سعودي
 {frag_info}{extra}
+
+**روابط مهووس الحقيقية (استخدمها في قسم "اكتشف المزيد"):**
+- رابط الماركة: {brand_url}
+- رابط التصنيف: {category_url}
 
 الطول: تقريباً 800–1500 كلمة، Markdown، بدون إيموجي.
 أكد الأصالة 100% مرة واحدة على الأقل بصيغة مهنية.
