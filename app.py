@@ -2697,10 +2697,17 @@ if page == "📊 لوحة التحكم":
             </div>
         </div>
         """, unsafe_allow_html=True)
-
+        # ── v33: KPI أداء التحليل ──
         _analysis_total_dash = len(r.get("all", pd.DataFrame())) if isinstance(r.get("all", pd.DataFrame()), pd.DataFrame) else 0
         if _analysis_total_dash:
-            st.caption(f"ملخص هذه الصفحة يخص آخر تحليل محفوظ لعدد **{_analysis_total_dash:,}** من منتجاتنا.")
+            _kpi1, _kpi2, _kpi3, _kpi4 = st.columns(4)
+            _kpi1.metric("📊 منتجات مُحلَّلة", f"{_analysis_total_dash:,}")
+            _kpi2.metric("🔍 مفقود جديد", f"{_missing_h:,}")
+            _review_h = len(r.get('review', pd.DataFrame()))
+            _kpi3.metric("⚠️ يحتاج مراجعة", f"{_review_h:,}")
+            _coverage = int((_approved_h + _lower_h) / max(_total_h, 1) * 100)
+            _kpi4.metric("🎯 تغطية تنافسية", f"{_coverage}%")
+            st.caption(f"ملخص آخر تحليل لـ **{_analysis_total_dash:,}** منتج.")
         _dash_nav = [
             ("🔴 سعر أعلى", "🔴", "سعر أعلى", "price_raise"),
             ("🟢 سعر أقل", "🟢", "سعر أقل", "price_lower"),
@@ -3823,17 +3830,31 @@ elif page == "🔍 منتجات مفقودة":
         df = df_missing_to_show
         _show_transparency_counter(_missing_total, len(df_missing_to_show) if isinstance(df_missing_to_show, pd.DataFrame) else 0)  # FIX: Missing Products Display Recovery
         if df is not None and not df.empty:
-            # ── إحصاءات سريعة ──────────────────────────────────────────────
+            # ── v33: إحصاءات محسّنة مع توزيع الثقة ──────────────────────
             total_miss   = len(df)
             has_tester   = df["نوع_متاح"].str.contains("تستر", na=False).sum()    if "نوع_متاح" in df.columns else 0
             has_base     = df["نوع_متاح"].str.contains("العطر الأساسي", na=False).sum() if "نوع_متاح" in df.columns else 0
             pure_missing = total_miss - has_tester - has_base
 
-            c1,c2,c3,c4 = st.columns(4)
-            c1.metric("🔍 مفقود فعلاً",    pure_missing)
-            c2.metric("🏷️ يوجد تستر",      has_tester)
-            c3.metric("✅ يوجد الأساسي",   has_base)
-            c4.metric("📦 إجمالي المنافسين", total_miss)
+            # عدد المنتجات حسب مستوى الثقة
+            _gc = len(df[df["مستوى_الثقة"] == "green"]) if "مستوى_الثقة" in df.columns else 0
+            _yc = len(df[df["مستوى_الثقة"] == "yellow"]) if "مستوى_الثقة" in df.columns else 0
+            _rc = len(df[df["مستوى_الثقة"] == "red"]) if "مستوى_الثقة" in df.columns else 0
+
+            # قيمة تقديرية
+            _est_val = 0
+            for _pc in ("سعر_المنافس", "سعر المنافس", "السعر"):
+                if _pc in df.columns:
+                    _est_val = pd.to_numeric(df[_pc], errors="coerce").sum()
+                    break
+
+            c1, c2, c3, c4, c5, c6 = st.columns(6)
+            c1.metric("🔍 مفقود فعلاً", f"{pure_missing:,}")
+            c2.metric("🟢 مؤكد", f"{_gc:,}")
+            c3.metric("🟡 محتمل", f"{_yc:,}")
+            c4.metric("🏷️ تستر", f"{has_tester:,}")
+            c5.metric("📦 إجمالي", f"{total_miss:,}")
+            c6.metric("💰 قيمة تقديرية", f"{_est_val:,.0f} ر.س")
 
             # ── تحليل AI الأولويات ────────────────────────────────────────
             with st.expander("🤖 تحليل AI — أولويات الإضافة", expanded=False):
