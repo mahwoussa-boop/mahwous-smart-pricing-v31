@@ -2799,6 +2799,8 @@ if page == "📊 لوحة التحكم":
             f"⏳ يوجد تحليل قيد التشغيل (Job: `{_lock_jid}`){_prog_txt} — "
             "زر «بدء التحليل» مُعطَّل حتى الانتهاء."
         )
+        # ── عداد التقدم الحي في المحتوى الرئيسي ──
+        _render_analysis_job_progress_live()
         # زر تحرير القفل يدوياً
         if st.button("🔓 تحرير القفل (إذا التحليل السابق انتهى ولم تظهر النتائج)", key="force_release_lock"):
             try:
@@ -2810,11 +2812,16 @@ if page == "📊 لوحة التحكم":
             except Exception as _rel_e:
                 st.error(f"❌ فشل تحرير القفل: {_rel_e}")
 
+    # ── حماية من الضغطات المتكررة ──
+    _btn_clicked_before = st.session_state.get("_analysis_btn_clicked", False)
+    if _btn_clicked_before and not _analysis_locked:
+        st.session_state["_analysis_btn_clicked"] = False
+
     if st.button(
         "🚀 بدء التحليل" if not _analysis_locked else "⏳ تحليل جارٍ... (يرجى الانتظار)",
         type="primary",
         key="dash_btn_start_analysis",
-        disabled=_analysis_locked,
+        disabled=_analysis_locked or _btn_clicked_before,
     ):
         # Second-chance re-check right before doing work: covers race between
         # render and click-handler (another replica may have acquired the lock).
@@ -3078,6 +3085,7 @@ if page == "📊 لوحة التحكم":
                     add_script_run_ctx(t)
                     t.start()
                     st.session_state.job_running = True
+                    st.session_state["_analysis_btn_clicked"] = True
                     import time as _start_t
                     st.session_state["_analysis_start_time"] = _start_t.time()
                     st.success(f"✅ بدأ التحليل في الخلفية (Job: {job_id})")
