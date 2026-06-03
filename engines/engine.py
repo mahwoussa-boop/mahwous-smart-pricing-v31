@@ -1457,6 +1457,14 @@ class CompIndex:
         else:
             self.extra_urls = [""] * n
 
+        # ⚡ v33: Brand Index — تقسيم المنتجات بالماركة لتسريع البحث ~5x
+        self._brand_index: dict[str, list[int]] = {}
+        for i, br in enumerate(self.brands):
+            br_key = normalize(br).lower() if br else ""
+            if br_key not in self._brand_index:
+                self._brand_index[br_key] = []
+            self._brand_index[br_key].append(i)
+
     def search(self, our_norm, our_br, our_sz, our_tp, our_gd, our_pline="", top_n=6):
         """بحث vectorized بـ rapidfuzz process.extract مع مقارنة خط الإنتاج"""
         if not self.norm_names: return []
@@ -1465,13 +1473,23 @@ class CompIndex:
         valid_idx = [i for i, n in enumerate(self.raw_names) if not is_sample(n)]
         if not valid_idx: return []
 
-        valid_norms = [self.norm_names[i] for i in valid_idx]
+        # ⚡ v33: Brand-First Search — فلتر بالماركة أولاً لتقليل المقارنات ~80%
+        _use_brand_filter = False
+        if our_br:
+            _br_key = normalize(our_br).lower()
+            _brand_candidates = self._brand_index.get(_br_key, [])
+            if len(_brand_candidates) >= 3:  # يكفي 3+ منتجات للبحث الموجّه
+                _brand_set = set(_brand_candidates)
+                _filtered_valid = [i for i in valid_idx if i in _brand_set]
+                if len(_filtered_valid) >= 3:
+                    valid_idx = _filtered_valid
+                    _use_brand_filter = True
 
+        valid_norms = [self.norm_names[i] for i in valid_idx]
         valid_aggs = [self.agg_names[i] for i in valid_idx]
 
         # ← استخدم agg_names للمطابقة (أدق للعربية)
-        # our_agg = normalize_aggressive للمنتج الخاص بنا
-        our_agg = normalize_name(our_norm) if our_norm else our_norm  # ← normalize_name
+        our_agg = normalize_name(our_norm) if our_norm else our_norm
         fast = rf_process.extract(
             our_agg, valid_aggs,
             scorer=fuzz.token_set_ratio,

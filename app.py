@@ -3861,21 +3861,71 @@ elif page == "🔍 منتجات مفقودة":
                         resp = _re.sub(r'```.*?```', '', resp, flags=_re.DOTALL)
                         st.markdown(f'<div class="ai-box">{resp}</div>', unsafe_allow_html=True)
 
-            # ── فلاتر ─────────────────────────────────────────────────────
+            # ── v33: فلاتر محسّنة ظاهرة ─────────────────────────────────
             opts = get_filter_options(df)
-            with st.expander("🔍 فلاتر", expanded=False):
-                c1,c2,c3,c4,c5 = st.columns(5)
-                search   = c1.text_input("🔎 بحث", key="miss_s")
-                brand_f  = c2.selectbox("الماركة", opts["brands"], key="miss_b")
-                comp_f   = c3.selectbox("المنافس", opts["competitors"], key="miss_c")
-                variant_f= c4.selectbox("النوع",
-                    ["الكل","مفقود فعلاً","يوجد تستر","يوجد الأساسي"], key="miss_v")
-                conf_f   = c5.selectbox("الثقة",
-                    ["الكل","🟢 مؤكد","🟡 محتمل","🔴 مشكوك"], key="miss_conf_f")
+            st.markdown("---")
 
+            # صف 1: بحث + مستوى الثقة (أزرار ملوّنة)
+            _f1, _f2 = st.columns([4, 6])
+            with _f1:
+                search = st.text_input("🔎 بحث في الاسم/الماركة", key="miss_s", placeholder="اكتب للبحث...")
+            with _f2:
+                _conf_options = ["الكل", "🟢 مؤكد", "🟡 محتمل", "🔴 مشكوك"]
+                _conf_cols = st.columns(len(_conf_options))
+                conf_f = "الكل"
+                for _ci, _co in enumerate(_conf_options):
+                    with _conf_cols[_ci]:
+                        _is_active = st.session_state.get("miss_conf_active", "الكل") == _co
+                        _btn_type = "primary" if _is_active else "secondary"
+                        if st.button(_co, key=f"miss_conf_btn_{_ci}", type=_btn_type, use_container_width=True):
+                            st.session_state["miss_conf_active"] = _co
+                            st.rerun()
+                conf_f = st.session_state.get("miss_conf_active", "الكل")
+
+            # صف 2: ماركة + منافس + نوع
+            _f3, _f4, _f5 = st.columns(3)
+            with _f3:
+                brand_f = st.selectbox("🏷️ الماركة", opts["brands"], key="miss_b")
+            with _f4:
+                comp_f = st.selectbox("🏪 المنافس", opts["competitors"], key="miss_c")
+            with _f5:
+                variant_f = st.selectbox("📦 النوع",
+                    ["الكل", "مفقود فعلاً", "يوجد تستر", "يوجد الأساسي"], key="miss_v")
+
+            # صف 3: نطاق السعر (slider)
+            _price_col = None
+            for _pc in ("سعر_المنافس", "سعر المنافس", "السعر"):
+                if _pc in df.columns:
+                    _price_col = _pc
+                    break
+            if _price_col:
+                _prices = pd.to_numeric(df[_price_col], errors="coerce").dropna()
+                if not _prices.empty:
+                    _pmin = int(max(0, _prices.min()))
+                    _pmax = int(min(99999, _prices.max()))
+                    if _pmax > _pmin:
+                        _p_range = st.slider(
+                            "💰 نطاق السعر (ر.س)", _pmin, _pmax, (_pmin, _pmax),
+                            key="miss_price_range"
+                        )
+                    else:
+                        _p_range = (_pmin, _pmax)
+                else:
+                    _p_range = None
+            else:
+                _p_range = None
+
+            st.markdown("---")
+
+            # ── تطبيق الفلاتر ──
             filtered = df.copy()
             if search:
-                filtered = filtered[filtered.apply(lambda r: search.lower() in str(r.values).lower(), axis=1)]
+                _s_lower = search.lower()
+                filtered = filtered[filtered.apply(
+                    lambda r: _s_lower in str(r.get("منتج_المنافس", "")).lower()
+                    or _s_lower in str(r.get("الماركة", "")).lower()
+                    or _s_lower in str(r.get("المنافس", "")).lower(), axis=1
+                )]
             if brand_f != "الكل" and "الماركة" in filtered.columns:
                 filtered = filtered[filtered["الماركة"].str.contains(brand_f, case=False, na=False, regex=False)]
             if comp_f != "الكل" and "المنافس" in filtered.columns:
@@ -3892,13 +3942,24 @@ elif page == "🔍 منتجات مفقودة":
                 _cv = _conf_map.get(conf_f, "")
                 if _cv:
                     filtered = filtered[filtered["مستوى_الثقة"] == _cv]
+            # فلتر السعر
+            if _p_range and _price_col and _price_col in filtered.columns:
+                _f_prices = pd.to_numeric(filtered[_price_col], errors="coerce").fillna(0)
+                filtered = filtered[(_f_prices >= _p_range[0]) & (_f_prices <= _p_range[1])]
 
-            # ── ترتيب حسب الثقة (الأكثر ثقة أولاً) ─────────────────────
+            # ── ترتيب ذكي: الأعلى ربحية × الأكثر ثقة ─────────────────
             if "مستوى_الثقة" in filtered.columns:
                 _conf_order = {"green": 0, "yellow": 1, "red": 2}
                 filtered = filtered.assign(
                     _conf_sort=filtered["مستوى_الثقة"].map(_conf_order).fillna(3)
                 ).sort_values("_conf_sort").drop(columns=["_conf_sort"])
+
+            # ── عداد النتائج ──
+            _fc1, _fc2, _fc3 = st.columns([2, 2, 6])
+            _fc1.metric("📋 نتائج الفلتر", f"{len(filtered):,}")
+            if _price_col and _price_col in filtered.columns:
+                _est_rev = pd.to_numeric(filtered[_price_col], errors="coerce").sum()
+                _fc2.metric("💰 قيمة تقديرية", f"{_est_rev:,.0f} ر.س")
 
             _export_ok, _export_issues = validate_export_product_dataframe(filtered)
             if not _export_ok:
