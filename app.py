@@ -2977,8 +2977,15 @@ if page == "📊 لوحة التحكم":
             or (_db_running_job or {}).get("job_id")
             or "?"
         )
-        _lock_proc = int((_db_running_job or {}).get("processed", 0))
-        _lock_tot  = int((_db_running_job or {}).get("total", 0))
+
+        # ══ قراءة التقدم مباشرة من DB (أدق من any_running_job) ══
+        _live_job = None
+        try:
+            _live_job = get_job_progress(_lock_jid)
+        except Exception:
+            pass
+        _lock_proc = int((_live_job or {}).get("processed", 0) or (_db_running_job or {}).get("processed", 0))
+        _lock_tot  = int((_live_job or {}).get("total", 0) or (_db_running_job or {}).get("total", 0))
 
         # ══ شريط تقدم مرئي ══
         if _lock_tot > 0:
@@ -2988,14 +2995,17 @@ if page == "📊 لوحة التحكم":
                 f"⏳ التحليل جارٍ — تم **{_lock_proc:,}** من **{_lock_tot:,}** منتج. "
                 "اضغط «تحديث» لمتابعة التقدم."
             )
+        elif _lock_proc > 0:
+            st.progress(0.1, f"⚙️ جارٍ... {_lock_proc:,} منتج")
+            st.warning("⏳ التحليل بدأ — اضغط «تحديث» لمتابعة التقدم.")
         else:
-            st.info(f"⏳ تحليل جارٍ (Job: `{_lock_jid}`) — يرجى الانتظار.")
+            st.progress(0.05, "⚙️ جارٍ التجهيز...")
+            st.info(f"⏳ التحليل بدأ (Job: `{_lock_jid}`) — اضغط «تحديث» بعد ثوانٍ.")
 
         # ══ تحميل النتائج الجزئية أثناء التحليل ══
         try:
-            _running_job_data = get_job_progress(_lock_jid)
-            if _running_job_data and _running_job_data.get("results"):
-                _partial_recs = restore_results_from_json(_running_job_data["results"])
+            if _live_job and _live_job.get("results"):
+                _partial_recs = restore_results_from_json(_live_job["results"])
                 _partial_df = pd.DataFrame(_partial_recs)
                 if not _partial_df.empty:
                     _partial_r = _split_results(_partial_df)
