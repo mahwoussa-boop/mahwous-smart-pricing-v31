@@ -113,6 +113,28 @@ section[data-testid="stSidebar"] .st-key-nav_audit_tools button p {
     font-size: 0.9375rem !important;
 }
 /* ── زر القائمة الجانبية ── منقول إلى get_sidebar_toggle_js */
+/* ── v32: Enhanced Design System ── */
+.stat-card{background:#111827!important;border:1px solid #1F293788!important;transition:all .3s ease}
+.stat-card:hover{transform:translateY(-2px);box-shadow:0 8px 25px rgba(108,99,255,.2)!important;border-color:#6C63FF!important}
+.vs-row{background:#111827!important;border:1px solid #1F293788!important}
+.comp-strip{background:#0d1117!important;border:1px solid #1F293788!important;border-top:none!important}
+/* Priority badge */
+.priority-badge{display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border-radius:10px;font-size:.68rem;font-weight:700}
+.priority-high{background:rgba(255,23,68,.12);color:#FF1744;border:1px solid #FF174444}
+.priority-med{background:rgba(255,214,0,.12);color:#FFD600;border:1px solid #FFD60044}
+.priority-low{background:rgba(0,200,83,.12);color:#00C853;border:1px solid #00C85344}
+/* Pagination styling */
+.st-key-page_num input{text-align:center!important;font-size:1.1rem!important;font-weight:700!important}
+/* Better card gradients */
+.ai-box{background:#111827!important;border:1px solid #1F293788!important}
+.miss-card{background:linear-gradient(135deg,#0B0F19,#111827)!important}
+/* Smoother transitions */
+*{transition:color .15s ease,background .15s ease,border-color .15s ease}
+button[data-testid]{transition:all .2s ease!important}
+button[data-testid]:hover{transform:translateY(-1px)!important}
+/* Health score animation */
+@keyframes pulse-health{0%{opacity:1}50%{opacity:.85}100%{opacity:1}}
+
 </style>"""
 
 

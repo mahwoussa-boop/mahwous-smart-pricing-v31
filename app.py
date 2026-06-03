@@ -647,6 +647,32 @@ def db_log(page, action, details=""):
     except: pass
 
 
+
+def _calc_priority_score(row):
+    """Calculate priority score (0-100) for smart sorting."""
+    score = 0
+    try:
+        diff = abs(float(row.get('الفرق', 0) or 0))
+        match_pct = float(row.get('نسبة_التطابق', 0) or 0)
+        comp_price = float(row.get('سعر_المنافس', 0) or 0)
+        our_price = float(row.get('السعر', 0) or 0)
+        # 40 pts: price difference magnitude (bigger diff = higher priority)
+        score += min(diff / 5, 40)
+        # 30 pts: match confidence (higher match = more reliable)
+        score += (match_pct / 100) * 30
+        # 20 pts: percentage difference (not just absolute)
+        if our_price > 0:
+            pct_diff = abs(diff / our_price) * 100
+            score += min(pct_diff / 2.5, 20)
+        # 10 pts: has competitor price (confirmed competitive data)
+        if comp_price > 0:
+            score += 10
+    except Exception:
+        pass
+    return round(min(score, 100), 1)
+
+
+
 def _effective_column_map(df: pd.DataFrame, key_prefix: str):
     """
     يقرأ اختيارات القوائم المنسدلة (إن وُجدت) وإلا يعود لنتيجة التعرف التلقائي.
@@ -1383,12 +1409,19 @@ def render_pro_table(df, prefix, section_type="update", show_search=True,
     }
     filtered = apply_filters(df, filters)
 
+    # ── v32: Priority Score + Smart Sorting ──
+    filtered = filtered.copy()
+    filtered['_priority'] = filtered.apply(_calc_priority_score, axis=1)
+    filtered = filtered.sort_values('_priority', ascending=False).reset_index(drop=True)
+
+
     # ── شريط الأدوات ───────────────────────────
     ac1, ac2, ac3, ac4, ac5 = st.columns(5)
     with ac1:
         _exdf = filtered.copy()
         if "جميع المنافسين" in _exdf.columns: _exdf = _exdf.drop(columns=["جميع المنافسين"])
         if "جميع_المنافسين" in _exdf.columns: _exdf = _exdf.drop(columns=["جميع_المنافسين"])
+        if "_priority" in _exdf.columns: _exdf = _exdf.drop(columns=["_priority"])
         excel_data = export_to_excel(_exdf, prefix)
         st.download_button("📥 Excel", data=excel_data,
             file_name=f"{prefix}_{datetime.now().strftime('%Y%m%d')}.xlsx",
@@ -1400,6 +1433,7 @@ def render_pro_table(df, prefix, section_type="update", show_search=True,
         _csdf = filtered.copy()
         if "جميع المنافسين" in _csdf.columns: _csdf = _csdf.drop(columns=["جميع المنافسين"])
         if "جميع_المنافسين" in _csdf.columns: _csdf = _csdf.drop(columns=["جميع_المنافسين"])
+        if "_priority" in _csdf.columns: _csdf = _csdf.drop(columns=["_priority"])
         _csv_bytes = _csdf.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig")
         st.download_button("📄 CSV", data=_csv_bytes,
             file_name=f"{prefix}_{datetime.now().strftime('%Y%m%d')}.csv",
@@ -1495,15 +1529,41 @@ def render_pro_table(df, prefix, section_type="update", show_search=True,
     _show_transparency_counter(len(df), max(0, len(filtered) - _hidden_in_view))
     st.caption(f"عرض {len(filtered)} من {len(df)} منتج — {datetime.now().strftime('%H:%M:%S')}")
 
-    # ── Pagination ─────────────────────────────
-    PAGE_SIZE = 20 if (compact_cards and prefix == "raise") else 25
-    total_pages = max(1, (len(filtered) + PAGE_SIZE - 1) // PAGE_SIZE)
-    if total_pages > 1:
-        page_num = st.number_input("الصفحة", 1, total_pages, 1, key=f"{prefix}_pg")
-    else:
-        page_num = 1
-    start = (page_num - 1) * PAGE_SIZE
-    page_df = filtered.iloc[start:start + PAGE_SIZE]
+    # ── v32: Enhanced Pagination ─────────────────────
+    PAGE_SIZE = 25
+    total_items = len(filtered)
+    total_pages = max(1, (total_items + PAGE_SIZE - 1) // PAGE_SIZE)
+
+    # Top pagination controls
+    _pg_col1, _pg_col2, _pg_col3 = st.columns([1, 2, 1])
+    with _pg_col2:
+        page_num = st.number_input(
+            f"صفحة (من {total_pages})",
+            min_value=1, max_value=total_pages, value=1,
+            key=f"{prefix}_page_num"
+        )
+        _showing = min(PAGE_SIZE, total_items - (page_num - 1) * PAGE_SIZE)
+        st.caption(f"عرض {_showing} من {total_items} منتج")
+    with _pg_col1:
+        if total_pages > 1:
+            st.markdown(
+                f'<div style="text-align:center;padding:8px;color:#9CA3AF;font-size:.8rem">'
+                f'الصفحة {page_num} من {total_pages}</div>',
+                unsafe_allow_html=True,
+            )
+    with _pg_col3:
+        if total_pages > 1:
+            _pct_done = int((page_num / total_pages) * 100)
+            st.markdown(
+                f'<div style="margin:8px auto;width:90%;height:6px;background:#1F2937;border-radius:3px;overflow:hidden">'
+                f'<div style="width:{_pct_done}%;height:100%;background:#6C63FF;border-radius:3px"></div></div>',
+                unsafe_allow_html=True,
+            )
+
+    start_idx = (page_num - 1) * PAGE_SIZE
+    end_idx = min(start_idx + PAGE_SIZE, total_items)
+    page_df = filtered.iloc[start_idx:end_idx]
+
 
     # ── Task 3.2: Select-All / Deselect-All buttons ───────────────────────────
     # These set checkbox widget state BEFORE the widgets are rendered, which is
@@ -2158,6 +2218,20 @@ def render_pro_table(df, prefix, section_type="update", show_search=True,
             unsafe_allow_html=True,
         )
 
+    # ── v32: Bottom Pagination ───────────────
+    if total_pages > 1:
+        _bpg1, _bpg2, _bpg3 = st.columns([1, 2, 1])
+        with _bpg2:
+            st.markdown(
+                f'<div style="text-align:center;padding:12px;background:#111827;border-radius:10px;'
+                f'border:1px solid #1F293788;margin-top:8px">'
+                f'<span style="color:#9CA3AF;font-size:.85rem">'
+                f'الصفحة {page_num} من {total_pages} '
+                f'| إجمالي {total_items} منتج</span></div>',
+                unsafe_allow_html=True,
+            )
+
+
 
 # ════════════════════════════════════════════════
 # ════════════════════════════════════════════════
@@ -2496,6 +2570,41 @@ if page == "📊 لوحة التحكم":
 
     if st.session_state.results:
         r = st.session_state.results
+
+        # ── v32: Health Score ─────────────────────
+        _total_h = sum(len(r.get(k, pd.DataFrame())) for k in ['price_raise','price_lower','approved','review','excluded'])
+        if _total_h > 0:
+            _approved_h = len(r.get('approved', pd.DataFrame()))
+            _raise_h = len(r.get('price_raise', pd.DataFrame()))
+            _lower_h = len(r.get('price_lower', pd.DataFrame()))
+            _missing_h = len(r.get('missing', pd.DataFrame()))
+
+            _health = int(
+                (_approved_h / _total_h) * 40 +
+                (1 - _raise_h / _total_h) * 30 +
+                min(_lower_h / max(_total_h, 1), 0.3) * 30
+            )
+            _health = max(0, min(100, _health))
+            _health_color = '#10B981' if _health >= 70 else '#F59E0B' if _health >= 40 else '#EF4444'
+            _health_label = 'ممتاز 🌟' if _health >= 80 else 'جيد 👍' if _health >= 60 else 'يحتاج تحسين ⚠️' if _health >= 40 else 'ضعيف 🔴'
+
+            st.markdown(f"""
+        <div style="text-align:center;padding:20px;background:linear-gradient(135deg,#0B0F19,#111827);border-radius:16px;border:1px solid {_health_color}33;margin-bottom:20px">
+            <div style="font-size:.85rem;color:#9CA3AF;margin-bottom:8px">نقطة الصحة التسعيرية</div>
+            <div style="font-size:3.5rem;font-weight:900;color:{_health_color};line-height:1">{_health}</div>
+            <div style="font-size:.9rem;color:{_health_color};margin-top:4px">{_health_label}</div>
+            <div style="margin:12px auto;width:80%;height:8px;background:#1F2937;border-radius:4px;overflow:hidden">
+                <div style="width:{_health}%;height:100%;background:{_health_color};border-radius:4px;transition:width 0.5s"></div>
+            </div>
+            <div style="display:flex;justify-content:center;gap:24px;margin-top:12px;font-size:.75rem;color:#9CA3AF">
+                <span>✅ تنافسي: {_approved_h:,}</span>
+                <span>🔴 أعلى: {_raise_h:,}</span>
+                <span>🟢 أقل: {_lower_h:,}</span>
+                <span>🔍 مفقود: {_missing_h:,}</span>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
         _analysis_total_dash = len(r.get("all", pd.DataFrame())) if isinstance(r.get("all", pd.DataFrame()), pd.DataFrame) else 0
         if _analysis_total_dash:
             st.caption(f"ملخص هذه الصفحة يخص آخر تحليل محفوظ لعدد **{_analysis_total_dash:,}** من منتجاتنا.")
@@ -2520,6 +2629,42 @@ if page == "📊 لوحة التحكم":
                     st.session_state._nav_pending = sec_title
                     st.session_state.nav_flash = f"➡️ {sec_title}"
                     st.rerun()
+
+
+        # ── v32: Smart Value Cards ───────────────
+        _vc_cols = st.columns(3)
+        # Raise section: potential savings
+        _raise_df_vc = r.get('price_raise', pd.DataFrame())
+        _raise_sum = 0
+        if not _raise_df_vc.empty and 'الفرق' in _raise_df_vc.columns:
+            try: _raise_sum = _raise_df_vc['الفرق'].apply(lambda x: abs(float(x or 0))).sum()
+            except Exception: pass
+        with _vc_cols[0]:
+            st.markdown(f"""<div style="text-align:center;padding:16px;background:linear-gradient(135deg,#1a0a0a,#2d1111);border-radius:12px;border:1px solid #FF174433">
+            <div style="font-size:.8rem;color:#FF8A80">🔴 فرص التوفير</div>
+            <div style="font-size:1.8rem;font-weight:900;color:#FF1744;margin:4px 0">{_raise_sum:,.0f} <span style="font-size:.8rem">ر.س</span></div>
+            <div style="font-size:.7rem;color:#888">{len(_raise_df_vc)} منتج أعلى سعراً</div>
+            </div>""", unsafe_allow_html=True)
+        # Lower section: potential earnings
+        _lower_df_vc = r.get('price_lower', pd.DataFrame())
+        _lower_sum = 0
+        if not _lower_df_vc.empty and 'الفرق' in _lower_df_vc.columns:
+            try: _lower_sum = _lower_df_vc['الفرق'].apply(lambda x: abs(float(x or 0))).sum()
+            except Exception: pass
+        with _vc_cols[1]:
+            st.markdown(f"""<div style="text-align:center;padding:16px;background:linear-gradient(135deg,#0a1a0a,#112d11);border-radius:12px;border:1px solid #00C85333">
+            <div style="font-size:.8rem;color:#69F0AE">🟢 فرص الربح</div>
+            <div style="font-size:1.8rem;font-weight:900;color:#00C853;margin:4px 0">{_lower_sum:,.0f} <span style="font-size:.8rem">ر.س</span></div>
+            <div style="font-size:.7rem;color:#888">{len(_lower_df_vc)} منتج أقل سعراً</div>
+            </div>""", unsafe_allow_html=True)
+        # Missing section
+        _missing_df_vc = r.get('missing', pd.DataFrame())
+        with _vc_cols[2]:
+            st.markdown(f"""<div style="text-align:center;padding:16px;background:linear-gradient(135deg,#0a0a1a,#11112d);border-radius:12px;border:1px solid #448AFF33">
+            <div style="font-size:.8rem;color:#82B1FF">🔍 منتجات مفقودة</div>
+            <div style="font-size:1.8rem;font-weight:900;color:#448AFF;margin:4px 0">{len(_missing_df_vc)}</div>
+            <div style="font-size:.7rem;color:#888">فرصة لإضافة منتجات جديدة</div>
+            </div>""", unsafe_allow_html=True)
 
         # ملخص الثقة للمفقودات في لوحة التحكم
         _miss_dash = r.get("missing", pd.DataFrame())
