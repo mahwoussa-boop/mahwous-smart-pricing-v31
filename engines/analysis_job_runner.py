@@ -28,11 +28,9 @@ from utils.db_manager import log_analysis, save_job_progress, upsert_price_histo
 
 _logger = logging.getLogger(__name__)
 
-# حد أقصى لعمر وظيفة التحليل قبل إعلانها «عالقة» وإنهاؤها تلقائياً.
-# قابل للضبط عبر ENV بدون نشر. الافتراضي 20 دقيقة — كافٍ حتى لـ 5K منتج
-# ومقبول للواجهة (لا يبقى «running» للأبد ويقفل لوحة التحكم).
+# حد أقصى لعمر وظيفة التحليل — 60 دقيقة للأجهزة البطيئة
 _ANALYSIS_JOB_TIMEOUT_SEC = int(
-    os.environ.get("ANALYSIS_JOB_TIMEOUT_SEC", "1200")
+    os.environ.get("ANALYSIS_JOB_TIMEOUT_SEC", "3600")
 )
 
 # نمط أسماء الـ placeholder الوهمية («منتج P12345» / «P1172895619» …).

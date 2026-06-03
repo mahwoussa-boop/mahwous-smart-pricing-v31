@@ -2810,19 +2810,16 @@ if page == "📊 لوحة التحكم":
         _lock_proc = int((_db_running_job or {}).get("processed", 0))
         _lock_tot  = int((_db_running_job or {}).get("total", 0))
 
-        # ══ شريط تقدم مرئي في المحتوى الرئيسي ══
+        # ══ شريط تقدم مرئي ══
         if _lock_tot > 0:
             _lock_pct = min(_lock_proc / max(_lock_tot, 1), 0.99)
-            st.progress(_lock_pct, f"⚙️ تحليل: {_lock_proc:,} / {_lock_tot:,} منتج ({100*_lock_pct:.0f}%)")
+            st.progress(_lock_pct, f"⚙️ {_lock_proc:,} / {_lock_tot:,} ({100*_lock_pct:.0f}%)")
             st.warning(
-                f"⏳ التحليل جارٍ — تم تحليل **{_lock_proc:,}** من **{_lock_tot:,}** منتج. "
-                "الصفحة تتحدث تلقائياً كل 5 ثوانٍ."
+                f"⏳ التحليل جارٍ — تم **{_lock_proc:,}** من **{_lock_tot:,}** منتج. "
+                "اضغط «تحديث» لمتابعة التقدم."
             )
         else:
-            st.info(
-                f"⏳ يوجد تحليل قيد التشغيل (Job: `{_lock_jid}`) — "
-                "زر «بدء التحليل» مُعطَّل حتى الانتهاء."
-            )
+            st.info(f"⏳ تحليل جارٍ (Job: `{_lock_jid}`) — يرجى الانتظار.")
 
         # ══ تحميل النتائج الجزئية أثناء التحليل ══
         try:
@@ -2830,30 +2827,29 @@ if page == "📊 لوحة التحكم":
             if _running_job_data and _running_job_data.get("results"):
                 _partial_recs = restore_results_from_json(_running_job_data["results"])
                 _partial_df = pd.DataFrame(_partial_recs)
-                if not _partial_df.empty and len(_partial_df) > 0:
+                if not _partial_df.empty:
                     _partial_r = _split_results(_partial_df)
                     _partial_r["missing"] = pd.DataFrame()
                     st.session_state.results = _partial_r
                     st.session_state.analysis_df = _partial_df
-                    st.caption(f"📊 يُعرض حالياً {len(_partial_df):,} نتيجة جزئية في الأقسام أثناء التحليل")
+                    st.caption(f"📊 {len(_partial_df):,} نتيجة جزئية معروضة في الأقسام")
         except Exception:
             pass
 
-        # ══ تحديث تلقائي كل 5 ثوانٍ ══
-        st.markdown(
-            '<meta http-equiv="refresh" content="5">',
-            unsafe_allow_html=True,
-        )
-        # زر تحرير القفل يدوياً
-        if st.button("🔓 تحرير القفل (إذا التحليل السابق انتهى ولم تظهر النتائج)", key="force_release_lock"):
-            try:
-                release_stale_running_jobs(stale_after_seconds=0)  # تحرير فوري
-                st.session_state.job_running = False
-                st.session_state.job_id = None
-                st.success("✅ تم تحرير القفل — اضغط 'بدء التحليل' الآن")
+        # ══ زر تحديث يدوي (بدل meta refresh الذي يفصل الصفحة) ══
+        _rc1, _rc2 = st.columns([1, 1])
+        with _rc1:
+            if st.button("🔄 تحديث التقدم", key="refresh_progress", type="primary"):
                 st.rerun()
-            except Exception as _rel_e:
-                st.error(f"❌ فشل تحرير القفل: {_rel_e}")
+        with _rc2:
+            if st.button("🔓 تحرير القفل", key="force_release_lock"):
+                try:
+                    release_stale_running_jobs(stale_after_seconds=0)
+                    st.session_state.job_running = False
+                    st.session_state.job_id = None
+                    st.rerun()
+                except Exception as _rel_e:
+                    st.error(f"❌ {_rel_e}")
 
     # ── حماية من الضغطات المتكررة ──
     _btn_clicked_before = st.session_state.get("_analysis_btn_clicked", False)
