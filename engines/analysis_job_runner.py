@@ -28,9 +28,9 @@ from utils.db_manager import log_analysis, save_job_progress, upsert_price_histo
 
 _logger = logging.getLogger(__name__)
 
-# حد أقصى لعمر وظيفة التحليل — 60 دقيقة للأجهزة البطيئة
+# حد أقصى لعمر وظيفة التحليل — 2 ساعة للأجهزة البطيئة
 _ANALYSIS_JOB_TIMEOUT_SEC = int(
-    os.environ.get("ANALYSIS_JOB_TIMEOUT_SEC", "3600")
+    os.environ.get("ANALYSIS_JOB_TIMEOUT_SEC", "7200")
 )
 
 # نمط أسماء الـ placeholder الوهمية («منتج P12345» / «P1172895619» …).

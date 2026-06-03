@@ -2236,7 +2236,7 @@ def run_full_analysis(our_df, comp_dfs, progress_callback=None, use_ai=True,
 
     total   = len(our_df)
     pending = []
-    BATCH   = 8  # خفض من 12 إلى 8 لتقليل ضغط Gemini ومنع rate limit
+    BATCH   = 15  # حجم دفعة AI أكبر = API calls أقل = أسرع
 
     def _flush():
         """يُعالج الـ pending batch ويضيف النتائج مباشرة — محمي من الأخطاء"""
