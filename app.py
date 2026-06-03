@@ -2312,15 +2312,16 @@ def render_pro_table(df, prefix, section_type="update", show_search=True,
         )
 
     # ── v32: Bottom Pagination ───────────────
-    if total_pages > 1:
+    _btm_tp = max(1, (len(filtered) + 24) // 25)
+    if _btm_tp > 1:
         _bpg1, _bpg2, _bpg3 = st.columns([1, 2, 1])
         with _bpg2:
             st.markdown(
                 f'<div style="text-align:center;padding:12px;background:#111827;border-radius:10px;'
                 f'border:1px solid #1F293788;margin-top:8px">'
                 f'<span style="color:#9CA3AF;font-size:.85rem">'
-                f'الصفحة {page_num} من {total_pages} '
-                f'| إجمالي {total_items} منتج</span></div>',
+                f'صفحة {_pg_num} من {_btm_tp} '
+                f'| إجمالي {len(filtered)} منتج</span></div>',
                 unsafe_allow_html=True,
             )
 
@@ -2697,7 +2698,8 @@ if page == "📊 لوحة التحكم":
             </div>
         </div>
         """, unsafe_allow_html=True)
-        # ── v33: KPI أداء التحليل ──
+
+        # ── v33: KPI أداء التحليل ──
         _analysis_total_dash = len(r.get("all", pd.DataFrame())) if isinstance(r.get("all", pd.DataFrame()), pd.DataFrame) else 0
         if _analysis_total_dash:
             _kpi1, _kpi2, _kpi3, _kpi4 = st.columns(4)
