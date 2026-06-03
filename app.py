@@ -16,6 +16,12 @@ app.py - نظام التسعير الذكي مهووس v26.0
 ✅ محرك كشط غير متزامن (Async Scraper + Detached Process)
 ✅ فحص ذاتي عند الإقلاع (Health Check)
 """
+import os as _os_early
+_os_early.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+_os_early.environ.setdefault("MKL_NUM_THREADS", "1")
+_os_early.environ.setdefault("OMP_NUM_THREADS", "1")
+_os_early.environ.setdefault("OPENBLAS_MAIN_FREE", "1")
+
 import nest_asyncio
 nest_asyncio.apply()
 
@@ -47,7 +53,6 @@ from config import *
 SECTIONS = [
     "✨ مصنع المنتجات",
     "📊 لوحة التحكم",
-    "🧠 ذكاء المنافسين",
     "🔴 سعر أعلى",
     "🟢 سعر أقل",
     "✅ موافق عليها",
@@ -3139,17 +3144,6 @@ if page == "📊 لوحة التحكم":
                     st.balloons()
                     st.rerun()
 
-# ════════════════════════════════════════════════
-#  1.5 ذكاء المنافسين (v31)
-# ════════════════════════════════════════════════
-elif page == "🧠 ذكاء المنافسين":
-    try:
-        from pages.competitor_intelligence_page import render_competitor_intelligence
-        render_competitor_intelligence()
-    except Exception as _ci_err:
-        st.error(f"❌ خطأ في تحميل ذكاء المنافسين: {_ci_err}")
-        import traceback
-        st.code(traceback.format_exc())
 
 
 # ════════════════════════════════════════════════
@@ -3348,6 +3342,96 @@ elif page == "🔍 منتجات مفقودة":
                     )
                     _response = call_ai(_prompt, "missing")
                     st.markdown(f'<div class="ai-box">{_response["response"]}</div>', unsafe_allow_html=True)
+
+    # ── 🧠 كشف ذكي من المخزن التراكمي (v31) ─────────────────────────────
+    with st.expander("🧠 كشف ذكي من المخزن التراكمي (16+ متجر)", expanded=False):
+        st.markdown(
+            "يبحث في **قاعدة بيانات المنافسين التراكمية** عن منتجات غير موجودة "
+            "عندنا — بالبصمة الذكية (بدون تكرار)."
+        )
+        try:
+            from engines.competitor_intelligence import CompetitorIntelligence
+            import os as _ci_os
+            _ci_db = _ci_os.path.join(_ci_os.environ.get("DATA_DIR", "data"), "pricing_v18.db")
+            _ci = CompetitorIntelligence(db_path=_ci_db)
+
+            # إحصائيات سريعة
+            _ci_stats = _ci.get_stats()
+            _ci_m1, _ci_m2, _ci_m3 = st.columns(3)
+            _ci_m1.metric("📦 منتجات المنافسين", f"{_ci_stats.get('total_products', 0):,}")
+            _ci_m2.metric("🏪 المتاجر", f"{_ci_stats.get('total_competitors', 0)}")
+            _ci_m3.metric("🆕 جديد (7 أيام)", f"{_ci_stats.get('new_7d', 0):,}")
+
+            # فلاتر
+            _ci_f1, _ci_f2 = st.columns(2)
+            with _ci_f1:
+                _ci_comps = ["الكل"] + (_ci.get_available_competitors() or [])
+                _ci_sel_comp = st.selectbox("🏪 المتجر", _ci_comps, key="ci_miss_comp")
+            with _ci_f2:
+                _ci_brands = ["الكل"] + (_ci.get_available_brands()[:50] or [])
+                _ci_sel_brand = st.selectbox("🏷️ الماركة", _ci_brands, key="ci_miss_brand")
+
+            _ci_filters = {}
+            if _ci_sel_comp != "الكل":
+                _ci_filters["competitor"] = _ci_sel_comp
+            if _ci_sel_brand != "الكل":
+                _ci_filters["brand"] = _ci_sel_brand
+
+            _ci_page = st.number_input("الصفحة", min_value=1, value=1, step=1, key="ci_miss_page")
+
+            our_df = st.session_state.get("our_df")
+            if our_df is not None and not our_df.empty:
+                if st.button("🔍 بحث عن المفقود من المخزن", key="ci_miss_search", type="primary"):
+                    with st.spinner("🧠 جاري تحليل البصمات..."):
+                        import time as _ci_time
+                        _ci_t0 = _ci_time.time()
+                        _ci_prods, _ci_total = _ci.find_missing_products(
+                            our_df, page=_ci_page - 1, per_page=20, filters=_ci_filters
+                        )
+                        _ci_elapsed = _ci_time.time() - _ci_t0
+                        st.session_state["_ci_missing_results"] = (_ci_prods, _ci_total, _ci_elapsed)
+
+                # عرض النتائج المحفوظة
+                _ci_cached = st.session_state.get("_ci_missing_results")
+                if _ci_cached:
+                    _ci_prods, _ci_total, _ci_elapsed = _ci_cached
+                    st.caption(f"❌ {_ci_total:,} منتج غير متوفر لدينا — ({_ci_elapsed:.1f}s)")
+
+                    if _ci_prods:
+                        for _ci_i, _ci_p in enumerate(_ci_prods):
+                            _ci_c1, _ci_c2, _ci_c3 = st.columns([3, 1, 1])
+                            with _ci_c1:
+                                _ci_name = _ci_p.get("product_name", "")
+                                _ci_brand = _ci_p.get("brand", "")
+                                st.markdown(f"**{_ci_name[:100]}**")
+                                _ci_parts = []
+                                if _ci_brand:
+                                    _ci_parts.append(f"🏷️ {_ci_brand}")
+                                _ci_parts.append(f"💰 أقل: {_ci_p.get('min_price', 0):,.0f} ر.س")
+                                _ci_parts.append(f"📊 عند {_ci_p.get('competitor_count', 1)} منافسين")
+                                _ci_parts.append(f"💵 المقترح: {_ci_p.get('suggested_price', 0):,.0f} ر.س")
+                                st.caption(" | ".join(_ci_parts))
+                            with _ci_c2:
+                                if st.button("🤖 تجهيز", key=f"ci_prep_{_ci_i}_{_ci_page}"):
+                                    _ci_prepared = _ci.prepare_for_make(_ci_p)
+                                    st.session_state[f"ci_prepared_{_ci_i}"] = _ci_prepared
+                                    st.success("✅")
+                            with _ci_c3:
+                                _ci_prep_data = st.session_state.get(f"ci_prepared_{_ci_i}")
+                                if _ci_prep_data:
+                                    if st.button("📤 Make", key=f"ci_send_{_ci_i}_{_ci_page}"):
+                                        try:
+                                            _ci_result = send_new_products([_ci_prep_data])
+                                            st.success("✅ تم الإرسال")
+                                        except Exception as _ci_e:
+                                            st.error(f"فشل: {_ci_e}")
+                            st.divider()
+                    else:
+                        st.success("🎉 كل منتجات المنافسين متوفرة لديك!")
+            else:
+                st.warning("⚠️ ارفع كتالوج منتجاتنا أولاً من لوحة التحكم")
+        except Exception as _ci_err:
+            st.error(f"تعذّر تحميل محرك الذكاء: {_ci_err}")
 
     st.caption(
         "العدد هنا = **عناوين فريدة** بعد إزالة التكرار والمطابقة مع كتالوجنا — وليس بالضرورة كل صفوف ملف المنافس."
