@@ -2807,18 +2807,43 @@ if page == "📊 لوحة التحكم":
             or (_db_running_job or {}).get("job_id")
             or "?"
         )
-        _lock_proc = (_db_running_job or {}).get("processed", 0)
-        _lock_tot  = (_db_running_job or {}).get("total", 0)
-        _prog_txt = (
-            f" — {_lock_proc:,}/{_lock_tot:,}"
-            if (_lock_tot and _lock_tot > 0) else ""
+        _lock_proc = int((_db_running_job or {}).get("processed", 0))
+        _lock_tot  = int((_db_running_job or {}).get("total", 0))
+
+        # ══ شريط تقدم مرئي في المحتوى الرئيسي ══
+        if _lock_tot > 0:
+            _lock_pct = min(_lock_proc / max(_lock_tot, 1), 0.99)
+            st.progress(_lock_pct, f"⚙️ تحليل: {_lock_proc:,} / {_lock_tot:,} منتج ({100*_lock_pct:.0f}%)")
+            st.warning(
+                f"⏳ التحليل جارٍ — تم تحليل **{_lock_proc:,}** من **{_lock_tot:,}** منتج. "
+                "الصفحة تتحدث تلقائياً كل 5 ثوانٍ."
+            )
+        else:
+            st.info(
+                f"⏳ يوجد تحليل قيد التشغيل (Job: `{_lock_jid}`) — "
+                "زر «بدء التحليل» مُعطَّل حتى الانتهاء."
+            )
+
+        # ══ تحميل النتائج الجزئية أثناء التحليل ══
+        try:
+            _running_job_data = get_job_progress(_lock_jid)
+            if _running_job_data and _running_job_data.get("results"):
+                _partial_recs = restore_results_from_json(_running_job_data["results"])
+                _partial_df = pd.DataFrame(_partial_recs)
+                if not _partial_df.empty and len(_partial_df) > 0:
+                    _partial_r = _split_results(_partial_df)
+                    _partial_r["missing"] = pd.DataFrame()
+                    st.session_state.results = _partial_r
+                    st.session_state.analysis_df = _partial_df
+                    st.caption(f"📊 يُعرض حالياً {len(_partial_df):,} نتيجة جزئية في الأقسام أثناء التحليل")
+        except Exception:
+            pass
+
+        # ══ تحديث تلقائي كل 5 ثوانٍ ══
+        st.markdown(
+            '<meta http-equiv="refresh" content="5">',
+            unsafe_allow_html=True,
         )
-        st.info(
-            f"⏳ يوجد تحليل قيد التشغيل (Job: `{_lock_jid}`){_prog_txt} — "
-            "زر «بدء التحليل» مُعطَّل حتى الانتهاء."
-        )
-        # ── عداد التقدم الحي في المحتوى الرئيسي ──
-        _render_analysis_job_progress_live()
         # زر تحرير القفل يدوياً
         if st.button("🔓 تحرير القفل (إذا التحليل السابق انتهى ولم تظهر النتائج)", key="force_release_lock"):
             try:
