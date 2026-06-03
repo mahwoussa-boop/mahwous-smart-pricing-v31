@@ -233,7 +233,7 @@ _SYN = {
     "جولد":"gold","قولد":"gold",
     "سيلفر":"silver","سيلفير":"silver",
     "نايت":"night","نايث":"night",
-    "داي":"day","دي":"day",
+    # حُذفت: "داي"→day و"دي"→day لأنها حروف جر تُفسد أسماء الماركات (دي مارلي، دي جيو)
     # ── v26.0: مرادفات إضافية لزيادة الدقة ──
     # أحجام بديلة
     "٥٠":"50","٧٥":"75","١٠٠":"100","١٢٥":"125","١٥٠":"150","٢٠٠":"200",
@@ -273,7 +273,7 @@ _SYN = {
     "زعفران":"saffron","زعفراني":"saffron",
     "بخور":"incense","بخوري":"incense",
     "فانيلا":"vanilla","فانيليا":"vanilla",
-    "باتشولي":"patchouli","باتشولي":"patchouli",
+    "باتشولي":"patchouli",
     "صندل":"sandalwood","صندلي":"sandalwood",
     "توباكو":"tobacco","تبغ":"tobacco",
     # تصحيح إملائي شائع
@@ -281,12 +281,30 @@ _SYN = {
     "تولت":"edt","تويلت":"edt",
 }
 
+# ─── ⚡ v31: regex مُجمَّع للمرادفات — يُحوِّل 280 str.replace إلى عملية واحدة ───
+_SYN_SORTED = sorted(_SYN.keys(), key=len, reverse=True)  # الأطول أولاً لمنع تعارض
+_SYN_RE = re.compile("|".join(re.escape(k) for k in _SYN_SORTED), re.UNICODE)
+def _syn_replace(t):
+    """استبدال المرادفات بـ regex واحد بدل 280 حلقة — ~10x أسرع"""
+    return _SYN_RE.sub(lambda m: _SYN[m.group(0)], t)
+
 # ─── v26.0: Fuzzy Spell Correction ────────────────
 # ✅ إصلاح #5: LRU cache لتجنب إعادة بناء قائمة الماركات مع كل استدعاء
 @_functools.lru_cache(maxsize=1)
 def _get_normalized_brands():
     """يُحسب مرة واحدة فقط عند أول استدعاء"""
     return [(b, b.lower()) for b in KNOWN_BRANDS]
+
+@_functools.lru_cache(maxsize=1)
+def _get_brand_normalized_pairs():
+    """⚡ v31: أزواج (ماركة أصلية, ماركة مطبَّعة, ماركة lower) — تُحسب مرة واحدة"""
+    pairs = []
+    for b in KNOWN_BRANDS:
+        n = b.strip().lower()
+        # تطبيع خفيف بدون normalize() الكاملة لتجنب تغيير اسم الماركة
+        n = _syn_replace(n)
+        pairs.append((b, n, b.lower()))
+    return pairs
 
 
 def _fuzzy_correct_brand(text: str, threshold: int = 82) -> str:
@@ -874,10 +892,8 @@ def normalize(text):
     """تطبيع قياسي: يوحّد الحروف والمرادفات مع الحفاظ على كامل النص"""
     if not isinstance(text, str): return ""
     t = text.strip().lower()
-    # ✅ إصلاح #4: المرادفات أولاً — يجب أن تسبق توحيد الهمزات
-    # (كانت مفاتيح _SYN بهمزات لا تُطابَق بعد توحيد الهمزات في الخطوة الأولى)
-    for k, v in _SYN.items():
-        t = t.replace(k, v)
+    # ⚡ v31: regex مُجمَّع بدل 280 str.replace — ~10x أسرع
+    t = _syn_replace(t)
     # 2. توحيد الهمزات بعد المرادفات (لمعالجة ما تبقى من نصوص)
     for src, dst in [('أ','ا'),('إ','ا'),('آ','ا'),('ة','ه'),
                      ('ى','ي'),('ؤ','و'),('ئ','ي'),('ـ','')]:
@@ -898,9 +914,8 @@ def normalize_name(text):
     """
     if not isinstance(text, str): return ""
     t = text.strip().lower()
-    # ✅ إصلاح #4: المرادفات أولاً — يجب أن تسبق توحيد الهمزات
-    for k, v in _SYN.items():
-        t = t.replace(k, v)
+    # ⚡ v31: regex مُجمَّع بدل 280 str.replace
+    t = _syn_replace(t)
     # 2. توحيد الهمزات بعد المرادفات
     for src, dst in [('أ','ا'),('إ','ا'),('آ','ا'),('ة','ه'),
                      ('ى','ي'),('ؤ','و'),('ئ','ي'),('ـ','')]:
@@ -931,9 +946,9 @@ def extract_brand(text):
     if not isinstance(text, str): return ""
     n = normalize(text)
     tl = text.lower()
-    # 1. مطابقة مباشرة
-    for b in KNOWN_BRANDS:
-        if normalize(b) in n or b.lower() in tl: return b
+    # 1. ⚡ v31: مطابقة مباشرة مع أزواج مطبَّعة مسبقاً (بدل normalize لكل ماركة)
+    for b_orig, b_norm, b_low in _get_brand_normalized_pairs():
+        if b_norm in n or b_low in tl: return b_orig
     # 2. v26.0: تصحيح إملائي ذكي (fallback)
     words = text.split()
     # ✅ إصلاح #5: حد أقصى 12 مجموعة كلمات لتجنب O(N×W×B) التكرار المفرط
@@ -963,7 +978,7 @@ def extract_gender(text):
     if not isinstance(text, str): return ""
     tl = text.lower()
     # تم التحديث ليشمل mans وصيغ الرجال المطلوبة
-    m = any(k in tl for k in ["pour homme","for men"," men "," man ","رجالي","للرجال"," مان "," هوم ","homme"," uomo", "mans", "for mans", " mans "])
+    m = any(k in tl for k in ["pour homme","for men"," men "," men"," man ","رجالي","للرجال"," مان "," هوم ","homme"," uomo", "mans", "for mans", " mans "])
     w = any(k in tl for k in ["pour femme","for women","women"," woman ","نسائي","للنساء","النسائي","lady","femme"," donna"])
     if m and not w: return "رجالي"
     if w and not m: return "نسائي"
@@ -1049,7 +1064,7 @@ def extract_product_line(text, brand=""):
     # إزالة الرموز
     n = re.sub(r'[^\w\s\u0600-\u06FF]', ' ', n)
     # توحيد الهمزات
-    for k, v in {'أ':'ا','إ':'ا','آ':'ا','ة':'ه','ى':'ي'}.items():
+    for k, v in {'أ':'ا','إ':'ا','آ':'ا','ة':'ه','ى':'ي','ؤ':'و','ئ':'ي'}.items():
         n = n.replace(k, v)
     return re.sub(r'\s+', ' ', n).strip()
 
@@ -1111,8 +1126,11 @@ def _price(row):
         if c in row.index:
             try: return float(str(row[c]).replace(",",""))
             except (ValueError, TypeError): pass
-    # احتياطي: ابحث عن أي عمود رقمي يشبه السعر
+    # احتياطي مُقيَّد: فقط أعمدة تبدو سعرية (يمنع خلط SKU/كمية بالسعر)
     for c in row.index:
+        cl = str(c).lower()
+        if "سعر" not in cl and "price" not in cl and "cost" not in cl and "ثمن" not in cl:
+            continue  # ← تخطي الأعمدة غير السعرية
         try:
             v = float(str(row[c]).replace(",",""))
             if 1 <= v <= 99999:  # نطاق سعر معقول
@@ -1425,6 +1443,8 @@ class CompIndex:
         self.types      = [extract_type(n) for n in self.raw_names]
         self.genders    = [extract_gender(n) for n in self.raw_names]
         self.plines     = [extract_product_line(n, self.brands[i]) for i, n in enumerate(self.raw_names)]
+        # ⚡ v31: pre-compute classify_product لكل منتج — يمنع إعادة الحساب في search()
+        self.classes    = [classify_product(n) for n in self.raw_names]
         self.prices     = [_price(row) for _, row in self.df.iterrows()]
         self.ids        = [_pid(row, id_col) for _, row in self.df.iterrows()]
         n = len(self.df)
@@ -1460,6 +1480,7 @@ class CompIndex:
 
         cands = []
         seen  = set()
+        our_class = classify_product(our_norm)  # ⚡ v31: يُحسب مرة واحدة خارج الحلقة
         for _, fast_score, vi in fast:
             if fast_score < 45: continue  # ← يسمح بـ 45+ للمراجعة (60-85%)
             idx  = valid_idx[vi]
@@ -1479,9 +1500,8 @@ class CompIndex:
                 if our_sz > 0 and c_sz > 0 and abs(our_sz - c_sz) > 3: continue
             if our_gd and c_gd and our_gd != c_gd: continue
 
-            # ═══ فلتر تصنيف المنتج (retail/tester/set/hair_mist) ═══
-            our_class = classify_product(our_norm)
-            c_class = classify_product(name)
+            # ═══ ⚡ v31: فلتر تصنيف المنتج — our_class خارج الحلقة، c_class من المصفوفة المحسوبة مسبقاً ═══
+            c_class = self.classes[idx]  # ⚡ pre-computed في __init__
             if our_class != c_class:
                 # العينات تُستثنى تماماً
                 if our_class == 'rejected' or c_class == 'rejected':
@@ -1718,7 +1738,7 @@ def _ai_batch(batch):
     # ── 1. Gemini ─────────────────────────────────────────────────────────
     g_payload = {
         "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0, "maxOutputTokens": 300, "topP": 1, "topK": 1}
+        "generationConfig": {"temperature": 0, "maxOutputTokens": 500, "topP": 1, "topK": 1}
     }
     for key in (GEMINI_API_KEYS or []):
         if not key:

@@ -452,17 +452,37 @@ def _render_analysis_job_progress_live() -> None:
     tot = max(int(job.get("total") or 0), 1)
     proc = min(int(job.get("processed") or 0), tot)
     pct = proc / tot
-    st.progress(min(pct, 0.99), f"\u2699\ufe0f {proc:,}/{tot:,} \u2014 {100*pct:.0f}%")
+    # ⚡ v31: عداد تقدم مفصّل مع الوقت المتبقي والسرعة
     _el = ""
+    _eta_str = ""
+    _speed_str = ""
     try:
         import time as _tt
         _s0 = st.session_state.get("_analysis_start_time")
         if _s0:
             _sec = _tt.time() - _s0
-            _el = f" | {int(_sec//60)}:{int(_sec%60):02d}"
+            _el = f"{int(_sec//60)}:{int(_sec%60):02d}"
+            if proc > 0 and _sec > 2:
+                _speed = proc / _sec
+                _speed_str = f"{_speed:.1f}"
+                _remaining = (tot - proc) / _speed if _speed > 0 else 0
+                if _remaining > 0:
+                    _eta_min = int(_remaining // 60)
+                    _eta_sec = int(_remaining % 60)
+                    _eta_str = f"{_eta_min}:{_eta_sec:02d}"
     except Exception:
         pass
-    st.caption(f"\u2699 analyzing{_el}")
+    # شريط تفصيلي بألوان وإيموجي
+    _stage = "\U0001f50d" if pct < 0.3 else ("\u2699\ufe0f" if pct < 0.7 else ("\U0001f680" if pct < 0.95 else "\u2705"))
+    _parts = [f"{_stage} تحليل: **{proc:,}**/{tot:,} ({100*pct:.0f}%)"]
+    if _el:
+        _parts.append(f"\u23f1\ufe0f {_el}")
+    if _speed_str:
+        _parts.append(f"\u26a1 {_speed_str} منتج/ث")
+    if _eta_str:
+        _parts.append(f"\u23f3 متبقي: ~{_eta_str}")
+    st.progress(min(pct, 0.99))
+    st.caption(" | ".join(_parts))
 
 @st.fragment(run_every=3)
 def _scraper_main_tab_live_rerun_tick() -> None:
