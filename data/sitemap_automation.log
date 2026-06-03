@@ -1,0 +1,52 @@
+2026-06-01 12:43:58,139 [INFO]: 🚀 بدء معالجة المتجر: سعيد صلاح (https://saeedsalah.com/)  incremental=False
+2026-06-01 12:45:52,787 [INFO]: 🚀 بدء معالجة المتجر: سعيد صلاح (https://saeedsalah.com/)  incremental=False
+2026-06-01 12:47:42,730 [INFO]: 🚀 بدء معالجة المتجر: سعيد صلاح (https://saeedsalah.com/)  incremental=False
+2026-06-01 12:53:00,036 [INFO]: 🚀 بدء معالجة المتجر: سعيد صلاح (https://saeedsalah.com/)  incremental=False
+2026-06-01 14:03:57,572 [INFO]: 🚀 بدء معالجة المتجر: سعيد صلاح (https://saeedsalah.com/)  incremental=True
+2026-06-01 14:04:00,070 [INFO]: ✅ تم العثور على 2721 منتج في سعيد صلاح
+2026-06-01 14:04:00,072 [INFO]: 🆕 سعيد صلاح: لا يوجد كاش سابق — سيتم كشط الكل (2721)
+2026-06-01 14:04:00,078 [INFO]: ♻️ سعيد صلاح: استئناف من DB — تخطّي 1 رابط كُشط بنجاح اليوم. المتبقي: 2720
+2026-06-01 20:17:43,189 [INFO]: 🚀 بدء معالجة المتجر: سعيد صلاح (https://saeedsalah.com/)  incremental=True
+2026-06-02 20:42:53,731 [INFO]: HTTP Request: GET https://alkhabeershop.com/p/tom-ford-oud-wood "HTTP/2 302 Found"
+2026-06-02 20:42:53,947 [INFO]: HTTP Request: GET https://alkhabeershop.com "HTTP/2 200 OK"
+2026-06-02 20:42:55,506 [WARNING]: 403 from alkhabeershop.com — backing off 47s
+2026-06-02 20:46:31,332 [INFO]: [START] niche.sa (https://niche.sa/) incremental=False
+2026-06-02 20:46:35,702 [INFO]: [FOUND] niche.sa: 40 product URLs
+2026-06-02 20:46:38,260 [INFO]: [PROGRESS] niche.sa: 10/40 (25%) | OK=1 FAIL=9
+2026-06-02 20:46:38,741 [INFO]: [SAVE] niche.sa: committed 0 | total saved: 1/40
+2026-06-02 20:46:39,647 [INFO]: [PROGRESS] niche.sa: 20/40 (50%) | OK=2 FAIL=18
+2026-06-02 20:46:41,869 [INFO]: [SAVE] niche.sa: committed 0 | total saved: 5/40
+2026-06-02 20:46:42,009 [INFO]: [PROGRESS] niche.sa: 30/40 (75%) | OK=9 FAIL=21
+2026-06-02 20:46:44,089 [INFO]: [PROGRESS] niche.sa: 40/40 (100%) | OK=17 FAIL=23
+2026-06-02 20:46:44,107 [INFO]: [SAVE] niche.sa: committed 0 | total saved: 13/40
+2026-06-02 20:46:44,172 [INFO]: [SKIP] niche.sa: 23 URLs failed (no name/price) — no phantom rows inserted.
+2026-06-02 20:46:44,172 [INFO]: [DONE] niche.sa: success=17/40 | saved=13
+2026-06-02 20:48:39,899 [INFO]: [START] niche.sa (https://niche.sa/) incremental=False
+2026-06-02 20:48:42,876 [INFO]: [FOUND] niche.sa: 4563 product URLs
+2026-06-02 20:48:42,885 [INFO]: [RESUME] niche.sa: skipping 13 already scraped today
+2026-06-02 20:48:45,886 [INFO]: [SAVE] niche.sa: committed 0 | total saved: 10/20
+2026-06-02 20:48:45,886 [INFO]: [PROGRESS] niche.sa: 10/20 (50%) | OK=10 FAIL=0
+2026-06-02 20:48:48,221 [INFO]: [SAVE] niche.sa: committed 0 | total saved: 20/20
+2026-06-02 20:48:48,221 [INFO]: [PROGRESS] niche.sa: 20/20 (100%) | OK=20 FAIL=0
+2026-06-02 20:48:48,275 [INFO]: [DONE] niche.sa: success=20/20 | saved=20
+2026-06-02 21:52:37,126 [INFO]: [START] saeedsalah (https://saeedsalah.com/) incremental=False
+2026-06-02 21:52:40,667 [INFO]: [FOUND] saeedsalah: 2692 product URLs
+2026-06-02 21:52:43,345 [INFO]: [PROGRESS] saeedsalah: 10/15 (67%) | OK=1 FAIL=9
+2026-06-02 21:52:43,744 [INFO]: [SAVE] saeedsalah: committed 0 | total saved: 1/15
+2026-06-02 21:52:44,396 [INFO]: [PROGRESS] saeedsalah: 15/15 (100%) | OK=1 FAIL=14
+2026-06-02 21:52:44,407 [INFO]: [SKIP] saeedsalah: 14 URLs failed (no name/price) — no phantom rows inserted.
+2026-06-02 21:52:44,407 [INFO]: [DONE] saeedsalah: success=1/15 | saved=1
+2026-06-02 22:02:05,146 [INFO]: [START] saeedsalah (https://saeedsalah.com/) incremental=False
+2026-06-02 22:02:08,545 [WARNING]: 403 from saeedsalah.com — backing off 47s
+2026-06-02 22:02:57,019 [INFO]: [FOUND] saeedsalah: 2617 product URLs
+2026-06-02 22:02:57,027 [INFO]: [RESUME] saeedsalah: skipping 1 already scraped today
+2026-06-02 22:10:13,992 [INFO]: [START] saeedsalah (https://saeedsalah.com/) incremental=False
+2026-06-02 22:10:17,779 [INFO]: [FOUND] saeedsalah: 2617 product URLs
+2026-06-02 22:10:17,881 [INFO]: [RESUME] saeedsalah: skipping 1 already scraped today
+2026-06-02 22:10:22,132 [INFO]: [SAVE] saeedsalah: committed 0 | total saved: 1/15
+2026-06-02 22:10:23,575 [INFO]: [PROGRESS] saeedsalah: 10/15 (67%) | OK=9 FAIL=1
+2026-06-02 22:10:23,829 [INFO]: [SAVE] saeedsalah: committed 0 | total saved: 11/15
+2026-06-02 22:10:24,868 [INFO]: [PROGRESS] saeedsalah: 15/15 (100%) | OK=14 FAIL=1
+2026-06-02 22:10:24,892 [INFO]: [SAVE] saeedsalah: committed 0 | total saved: 14/15
+2026-06-02 22:10:24,970 [INFO]: [SKIP] saeedsalah: 1 URLs failed (no name/price) — no phantom rows inserted.
+2026-06-02 22:10:24,970 [INFO]: [DONE] saeedsalah: success=14/15 | saved=14
