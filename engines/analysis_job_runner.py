@@ -143,30 +143,24 @@ def run_analysis_background_job(
     def progress_cb(pct, current_results):
         nonlocal processed
         processed = int(pct * total)
-        # حفظ خفيف (تقدم فقط) كل 25 منتج — لشريط التقدم
-        if processed - _last_save[0] >= 25:
-            try:
-                save_job_progress(
-                    job_id, total, processed,
-                    [],  # بدون نتائج — خفيف جداً
-                    "running",
-                    our_file_name, comp_names,
-                )
-            except Exception:
-                pass
-        # حفظ كامل (مع النتائج) كل 100 منتج
-        if processed - _last_save[0] >= 100 or processed >= total:
-            _last_save[0] = processed
-            try:
+        gap = processed - _last_save[0]
+        if gap < 50 and processed < total:
+            return  # لا حفظ — لم يمر 50 منتج بعد
+        _last_save[0] = processed
+        try:
+            # حفظ كامل كل 200 منتج أو عند الاكتمال
+            if gap >= 200 or processed >= total:
                 safe_res = safe_results_for_json(current_results)
-                save_job_progress(
-                    job_id, total, processed,
-                    safe_res,
-                    "running",
-                    our_file_name, comp_names,
-                )
-            except Exception:
-                traceback.print_exc()
+            else:
+                safe_res = []  # حفظ خفيف (تقدم فقط)
+            save_job_progress(
+                job_id, total, processed,
+                safe_res,
+                "running",
+                our_file_name, comp_names,
+            )
+        except Exception:
+            pass
 
     analysis_df = pd.DataFrame()
     missing_df = pd.DataFrame()

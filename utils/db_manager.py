@@ -1968,8 +1968,8 @@ def upsert_competitor_products(
     }
 
 
-def get_all_competitor_products(competitor: str = "") -> list[dict]:
-    """يُرجع كل منتجات المنافس (أو الكل إذا competitor فارغ)."""
+def get_all_competitor_products(competitor: str = "", limit: int = 30000) -> list[dict]:
+    """يُرجع منتجات المنافس — مع حد أقصى لحماية الذاكرة."""
     init_competitor_store()
     conn = get_db()
     if competitor:
@@ -1977,15 +1977,19 @@ def get_all_competitor_products(competitor: str = "") -> list[dict]:
             """SELECT competitor, product_name, price, image_url, product_url,
                       brand, size, gender, added_at, updated_at
                FROM competitor_products_store WHERE competitor=?
-               ORDER BY updated_at DESC""",
-            (competitor,)
+               ORDER BY price DESC
+               LIMIT ?""",
+            (competitor, limit)
         ).fetchall()
     else:
         rows = conn.execute(
             """SELECT competitor, product_name, price, image_url, product_url,
                       brand, size, gender, added_at, updated_at
                FROM competitor_products_store
-               ORDER BY competitor, updated_at DESC"""
+               WHERE price > 0
+               ORDER BY updated_at DESC
+               LIMIT ?""",
+            (limit,)
         ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
