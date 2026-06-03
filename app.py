@@ -3991,6 +3991,89 @@ elif page == "🔍 منتجات مفقودة":
                     for _ei in _export_issues[:40]:
                         st.caption(_ei)
 
+            # ── v33: تجهيز المفقودات المؤكدة بنقرة واحدة ──────────────
+            _green_df = filtered[filtered["مستوى_الثقة"] == "green"] if "مستوى_الثقة" in filtered.columns else filtered
+            _pure_green = _green_df[_green_df["نوع_متاح"].str.strip() == ""] if "نوع_متاح" in _green_df.columns else _green_df
+
+            st.markdown("### 🚀 تجهيز سريع — المفقودات المؤكدة")
+
+            _qc1, _qc2, _qc3 = st.columns([3, 3, 4])
+            with _qc1:
+                st.metric("🟢 جاهز للتجهيز", f"{len(_pure_green):,} منتج")
+            with _qc2:
+                if _price_col and _price_col in _pure_green.columns:
+                    _gval = pd.to_numeric(_pure_green[_price_col], errors="coerce").sum()
+                    st.metric("💰 قيمة", f"{_gval:,.0f} ر.س")
+            with _qc3:
+                _auto_sku = st.toggle("🔑 توليد SKU تلقائي", value=True, key="miss_auto_sku")
+
+            if st.button(
+                f"📦 تجهيز {len(_pure_green):,} منتج مؤكد (ملف سلة جاهز)",
+                type="primary", use_container_width=True, key="miss_prepare_all_green",
+                disabled=len(_pure_green) == 0,
+            ):
+                _prog = st.progress(0, "⚙️ جاري التجهيز...")
+                _total_g = len(_pure_green)
+                _prepared = []
+                for _gi, (_, _grow) in enumerate(_pure_green.iterrows()):
+                    _rd = _grow.to_dict()
+                    # توليد SKU إذا مفعّل
+                    if _auto_sku:
+                        _sk_brand = str(_rd.get("الماركة", "UNK"))[:3].upper()
+                        _sk_size = str(_rd.get("الحجم", "100")).replace(" ", "")[:4]
+                        _sk_hash = abs(hash(str(_rd.get("منتج_المنافس", "")))) % 9999
+                        _rd["رمز المنتج sku"] = f"MH-{_sk_brand}-{_sk_size}-{_sk_hash:04d}"
+                    _prepared.append(_rd)
+                    if (_gi + 1) % 5 == 0 or _gi == _total_g - 1:
+                        _prog.progress(min((_gi + 1) / _total_g, 0.99),
+                                       f"⚙️ {_gi+1}/{_total_g}")
+                _prog.progress(1.0, f"✅ تم تجهيز {_total_g} منتج")
+                _ready_df = pd.DataFrame(_prepared)
+                st.session_state["_v33_ready_green_df"] = _ready_df
+                st.success(f"✅ تم تجهيز **{_total_g}** منتج بمعايير مهووس الكاملة!")
+
+            # عرض أزرار التحميل إذا جاهز
+            if st.session_state.get("_v33_ready_green_df") is not None:
+                _ready_g = st.session_state["_v33_ready_green_df"]
+                _our_df_ref = st.session_state.get("analysis_df")
+                _export_mode = st.session_state.get("salla_export_mode", "safe")
+                _dl1, _dl2, _dl3 = st.columns(3)
+                with _dl1:
+                    try:
+                        _csv_b, _csv_c, _ = export_to_salla_shamel_csv(
+                            _ready_g, _our_df_ref, verify_missing=True, export_mode=_export_mode
+                        )
+                        st.download_button(
+                            f"📥 CSV سلة ({_csv_c} منتج)",
+                            data=_csv_b,
+                            file_name="mahwous_ready_products.csv",
+                            mime="text/csv; charset=utf-8",
+                            type="primary", use_container_width=True,
+                        )
+                    except Exception as _e_csv:
+                        st.error(f"❌ خطأ CSV: {_e_csv}")
+                with _dl2:
+                    try:
+                        _xlsx_b = export_to_salla_shamel(
+                            _ready_g, _our_df_ref, verify_missing=True, export_mode=_export_mode
+                        )
+                        st.download_button(
+                            "📥 XLSX Excel",
+                            data=_xlsx_b,
+                            file_name="mahwous_ready_products.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            use_container_width=True,
+                        )
+                    except Exception as _e_xl:
+                        st.error(f"❌ خطأ XLSX: {_e_xl}")
+                with _dl3:
+                    if st.button("🗑️ مسح التجهيز", key="miss_clear_ready"):
+                        st.session_state["_v33_ready_green_df"] = None
+                        st.rerun()
+                st.caption(f"📦 {len(_ready_g)} منتج جاهز — 40 عمود مطابق لقالب سلة")
+
+            st.markdown("---")
+
             # ── خط الإنتاج الذكي (المعالجة والتحقق الإلزامي) ────────────────
             st.markdown("### ⚙️ تجهيز وتصدير المنتجات المحددة")
 

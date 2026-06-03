@@ -172,6 +172,9 @@ def show() -> None:
         "ثم نصدّر ملف Excel (.xlsx) جاهز لاستيراد سلة الشامل."
     )
 
+    # v33: دعم الروابط المتعددة
+    st.info("💡 يمكنك لصق أكثر من رابط (سطر لكل رابط) للمعالجة الدفعية")
+
     progress_ph = st.empty()
     warn_ph = st.empty()
 
@@ -288,6 +291,12 @@ def show() -> None:
             barcode = st.text_input("الباركود (إن وُجد)", value=bundle.get("barcode", ""))
             seo_title = st.text_input("عنوان SEO / ترويجي", value=bundle.get("seo_title", ""))
             seo_desc = st.text_area("وصف SEO", value=bundle.get("seo_description", ""), height=80)
+            # v33: Auto-SKU
+            if not bundle.get("sku"):
+                _auto_brand = (bundle.get("brand") or "UNK")[:3].upper()
+                _auto_hash = abs(hash(bundle.get("product_name", ""))) % 9999
+                _auto_sku_val = f"MH-{_auto_brand}-{_auto_hash:04d}"
+                st.caption(f"💡 SKU مقترح: `{_auto_sku_val}`")
 
         # FIX: expose AI-generated gender and is_perfume fields so user can review/correct
         gc1, gc2 = st.columns(2)
@@ -390,8 +399,6 @@ def show() -> None:
             mime="text/csv; charset=utf-8",
             type="primary",
             use_container_width=True,
-        
-            on_click="ignore"
         )
     with c_xlsx:
         st.download_button(
@@ -400,9 +407,29 @@ def show() -> None:
             file_name="mahwous_missing_ready.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
-        
-            on_click="ignore"
         )
+
+    # v33: بوابة جودة
+    _quality_items = []
+    if bundle.get("product_name"): _quality_items.append("✅ اسم المنتج")
+    else: _quality_items.append("❌ اسم المنتج")
+    if bundle.get("brand"): _quality_items.append("✅ الماركة")
+    else: _quality_items.append("⚠️ الماركة (فارغة)")
+    if float(bundle.get("price", 0) or 0) > 0: _quality_items.append("✅ السعر")
+    else: _quality_items.append("❌ السعر")
+    if bundle.get("category"): _quality_items.append("✅ التصنيف")
+    else: _quality_items.append("⚠️ التصنيف (فارغ)")
+    if bundle.get("description_html") and len(bundle.get("description_html", "")) > 50: _quality_items.append("✅ الوصف")
+    else: _quality_items.append("⚠️ الوصف (قصير)")
+    if bundle.get("images"): _quality_items.append(f"✅ صور ({len(bundle.get('images', []))})")
+    else: _quality_items.append("❌ صور (لا توجد)")
+    _pass = sum(1 for q in _quality_items if q.startswith("✅"))
+    _total_q = len(_quality_items)
+    _pct_q = int((_pass / _total_q) * 100)
+    _q_color = "#10B981" if _pct_q >= 80 else "#F59E0B" if _pct_q >= 50 else "#EF4444"
+    st.markdown(f'<div style="padding:8px;border-radius:8px;border:1px solid {_q_color}33;margin:8px 0">'
+                f'<strong style="color:{_q_color}">🏷️ جودة المنتج: {_pct_q}%</strong> — '
+                + " | ".join(_quality_items) + "</div>", unsafe_allow_html=True)
 
     st.caption(
         "تأكد من أن **الماركة** و**التصنيف** يطابقان أسماء الملفات الرسمية لسلة لديك لتفادي رفض الاستيراد."
