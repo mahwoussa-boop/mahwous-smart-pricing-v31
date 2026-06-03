@@ -421,23 +421,48 @@ def _split_results(df):
 # ── تحديث حي بدون مكوّنات مخصصة (streamlit-autorefresh يفشل غالباً على السحابة/الوكيل) ───────────────
 @st.fragment(run_every=4)
 def _render_analysis_job_progress_live() -> None:
-    """شريط تقدّم التحليل الخلفي؛ يُحدَّث كل 4 ث داخل الـ fragment دون أصول خارجية."""
+    """v31: auto-refresh progress + auto-apply results on completion."""
     jid = st.session_state.get("job_id")
     if not jid:
         return
     job = get_job_progress(jid)
     if not job:
         return
-    if str(job.get("status", "")) != "running":
+    _st = str(job.get("status", ""))
+    # Auto-apply results when job completes
+    if _st == "done":
+        if job.get("results"):
+            _rs = restore_results_from_json(job["results"])
+            _df = pd.DataFrame(_rs)
+            _mdf = pd.DataFrame(job.get("missing", [])) if job.get("missing") else pd.DataFrame()
+            _sp = _split_results(_df)
+            _sp["missing"] = _mdf
+            st.session_state.results = _sp
+            st.session_state.analysis_df = _df
+        st.session_state.last_audit_stats = job.get("audit") or {}
+        st.session_state.job_running = False
+        st.session_state["_applied_job_results_id"] = jid
+        st.balloons()
+        st.rerun()
+        return
+    if _st != "running":
+        st.session_state.job_running = False
         st.rerun()
         return
     tot = max(int(job.get("total") or 0), 1)
     proc = min(int(job.get("processed") or 0), tot)
     pct = proc / tot
-    pct_lbl = f"{100.0 * pct:.1f}%"
-    st.progress(min(pct, 0.99), f"⚙️ {proc}/{tot} منتج — {pct_lbl}")
-    st.caption("تحليل خلفي — يُحدَّث كل بضع ثوانٍ. لا تغلق الصفحة حتى يكتمل.")
-
+    st.progress(min(pct, 0.99), f"\u2699\ufe0f {proc:,}/{tot:,} \u2014 {100*pct:.0f}%")
+    _el = ""
+    try:
+        import time as _tt
+        _s0 = st.session_state.get("_analysis_start_time")
+        if _s0:
+            _sec = _tt.time() - _s0
+            _el = f" | {int(_sec//60)}:{int(_sec%60):02d}"
+    except Exception:
+        pass
+    st.caption(f"\u2699 analyzing{_el}")
 
 @st.fragment(run_every=3)
 def _scraper_main_tab_live_rerun_tick() -> None:
@@ -559,9 +584,9 @@ def _persist_analysis_after_reclassify(adf: pd.DataFrame):
 # ── تحميل تلقائي للنتائج المحفوظة عند فتح التطبيق ──
 # FIX: البحث عن آخر وظيفة مكتملة (وليس آخر وظيفة فقط) لأن الوظائف المعلقة تمنع الاستعادة
 if st.session_state.results is None and not st.session_state.job_running:
-    # أولاً: تنظيف الوظائف المعلقة (أكثر من ساعة بدون تحديث)
+    # أولاً: تنظيف الوظائف المعلقة (أكثر من 5 دقائق بدون تحديث)
     try:
-        release_stale_running_jobs(stale_after_seconds=1800)  # 30 دقيقة
+        release_stale_running_jobs(stale_after_seconds=300)  # 5 دقائق
     except Exception:
         pass
 
@@ -3053,6 +3078,8 @@ if page == "📊 لوحة التحكم":
                     add_script_run_ctx(t)
                     t.start()
                     st.session_state.job_running = True
+                    import time as _start_t
+                    st.session_state["_analysis_start_time"] = _start_t.time()
                     st.success(f"✅ بدأ التحليل في الخلفية (Job: {job_id})")
                     st.rerun()
                 else:
