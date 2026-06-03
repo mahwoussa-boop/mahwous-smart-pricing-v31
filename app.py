@@ -2289,13 +2289,31 @@ with st.sidebar:
             except Exception as e:
                 st.caption(f"لا ملف secrets (طبيعي على Railway): {e}")
 
-    # حالة المعالجة — تحديث حي مع auto-rerun
+    # حالة المعالجة — تحديث حي مع auto-rerun + نتائج جزئية
     if st.session_state.job_id:
         job = get_job_progress(st.session_state.job_id)
         if job:
-            if job["status"] == "running":
-                _render_analysis_job_progress_live()
-            elif str(job.get("status", "")) == "done":
+            _job_status = str(job.get("status", ""))
+            if _job_status == "running":
+                # ── شريط تقدم في الشريط الجانبي ──
+                _sb_tot = max(int(job.get("total") or 0), 1)
+                _sb_proc = min(int(job.get("processed") or 0), _sb_tot)
+                _sb_pct = _sb_proc / _sb_tot
+                st.progress(min(_sb_pct, 0.99))
+                st.markdown(f"**⚙️ تحليل: {_sb_proc:,}/{_sb_tot:,} ({100*_sb_pct:.0f}%)**")
+                # ── تحميل النتائج الجزئية أثناء التحليل ──
+                if job.get("results"):
+                    try:
+                        _partial = restore_results_from_json(job["results"])
+                        _pdf = pd.DataFrame(_partial)
+                        if not _pdf.empty:
+                            _pr = _split_results(_pdf)
+                            _pr["missing"] = pd.DataFrame()
+                            st.session_state.results = _pr
+                            st.session_state.analysis_df = _pdf
+                    except Exception:
+                        pass
+            elif _job_status == "done":
                 if st.session_state.get("_applied_job_results_id") != st.session_state.job_id:
                     st.session_state["_applied_job_results_id"] = st.session_state.job_id
                     if job.get("results"):
@@ -2310,8 +2328,8 @@ with st.sidebar:
                     st.session_state.job_running = False
                     st.balloons()
                     st.rerun()
-            elif job["status"].startswith("error"):
-                st.error(f"❌ فشل: {job['status'][7:80]}")
+            elif _job_status.startswith("error"):
+                st.error(f"❌ فشل: {_job_status[7:80]}")
     page = st.radio("الأقسام", SECTIONS, label_visibility="collapsed", key="main_nav")
     st.markdown("---")
     if st.session_state.results:
