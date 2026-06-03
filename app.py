@@ -4606,10 +4606,10 @@ elif page == "⚠️ تحت المراجعة":
                 _rv_our_url = our_product_url_from_row(row)
                 _rv_comp_url = competitor_product_url_from_row(row)
                 _rv_our_title = linked_product_title(
-                    our_name[:60], _rv_our_url, color="#fff", font_size=".88rem",
+                    our_name[:60], _rv_our_url,
                 )
                 _rv_comp_title = linked_product_title(
-                    comp_name[:60], _rv_comp_url, color="#fff", font_size=".88rem",
+                    comp_name[:60], _rv_comp_url,
                 )
 
                 # ── بطاقة المقارنة (مع صور عند التوفر) ─────────────────
