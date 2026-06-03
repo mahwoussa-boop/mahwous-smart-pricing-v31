@@ -590,14 +590,22 @@ if st.session_state.results is None and not st.session_state.job_running:
     except Exception:
         pass
 
-    # ثانياً: البحث عن آخر وظيفة مكتملة (done) بنتائج
+    # ثانياً: البحث عن آخر وظيفة مكتملة بنتائج (تفضيل التي فيها مفقودات)
     _auto_job = None
     try:
         conn = get_db()
+        # أولاً: ابحث عن وظيفة فيها نتائج + مفقودات
         _done_row = conn.execute(
-            "SELECT job_id FROM job_progress WHERE status='done' AND results_json != '[]' "
+            "SELECT job_id FROM job_progress WHERE status='done' "
+            "AND results_json != '[]' AND missing_json IS NOT NULL AND missing_json != '[]' "
             "ORDER BY id DESC LIMIT 1"
         ).fetchone()
+        # إذا لم نجد، ابحث عن أي وظيفة بنتائج
+        if not _done_row:
+            _done_row = conn.execute(
+                "SELECT job_id FROM job_progress WHERE status='done' AND results_json != '[]' "
+                "ORDER BY id DESC LIMIT 1"
+            ).fetchone()
         conn.close()
         if _done_row:
             _auto_job = get_job_progress(_done_row["job_id"])
@@ -609,6 +617,23 @@ if st.session_state.results is None and not st.session_state.job_running:
         _auto_df = pd.DataFrame(_auto_records)
         if not _auto_df.empty:
             _auto_miss = pd.DataFrame(_auto_job.get("missing", [])) if _auto_job.get("missing") else pd.DataFrame()
+
+            # إذا لا توجد مفقودات، ابحث عنها في وظائف أقدم
+            if _auto_miss.empty:
+                try:
+                    _miss_conn = get_db()
+                    _miss_row = _miss_conn.execute(
+                        "SELECT missing_json FROM job_progress WHERE status='done' "
+                        "AND missing_json IS NOT NULL AND missing_json != '[]' "
+                        "ORDER BY id DESC LIMIT 1"
+                    ).fetchone()
+                    _miss_conn.close()
+                    if _miss_row:
+                        import json as _json_miss
+                        _auto_miss = pd.DataFrame(_json_miss.loads(_miss_row["missing_json"]))
+                except Exception:
+                    pass
+
             _auto_r = _split_results(_auto_df)
             _auto_r["missing"] = _auto_miss
             st.session_state.results     = _auto_r
