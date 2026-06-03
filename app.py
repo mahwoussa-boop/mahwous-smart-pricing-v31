@@ -408,14 +408,44 @@ def _split_results(df):
         except Exception:
             return pd.Series([False] * len(work), index=work.index)
 
-    return {
-        "price_raise": work[_contains("أعلى")].reset_index(drop=True),
-        "price_lower": work[_contains("أقل")].reset_index(drop=True),
-        "approved": work[_contains("موافق")].reset_index(drop=True),
-        "review": work[_contains("مراجعة")].reset_index(drop=True),
-        "excluded": work[_contains("مستبعد")].reset_index(drop=True),
-        "all": work.reset_index(drop=True),
+    # ── v33: Safety Net — أي منتج بقرار غير معروف يذهب لـ "مستبعد" بدل الضياع ──
+    price_raise = work[_contains("أعلى")]
+    price_lower = work[_contains("أقل")]
+    approved    = work[_contains("موافق")]
+    review      = work[_contains("مراجعة")]
+    excluded    = work[_contains("مستبعد")]
+
+    # جمع كل المنتجات المُوزَّعة
+    _distributed_idx = set()
+    for _sec_df in [price_raise, price_lower, approved, review, excluded]:
+        _distributed_idx.update(_sec_df.index.tolist())
+
+    # المنتجات التي لم تُوزَّع على أي قسم (قرار فارغ/غير معروف)
+    _orphan_mask = ~work.index.isin(_distributed_idx)
+    _orphans = work[_orphan_mask]
+    if not _orphans.empty:
+        # ألحقها بـ "مستبعد" لمنع فقدان البيانات
+        excluded = pd.concat([excluded, _orphans], ignore_index=False)
+
+    result = {
+        "price_raise": price_raise.reset_index(drop=True),
+        "price_lower": price_lower.reset_index(drop=True),
+        "approved":    approved.reset_index(drop=True),
+        "review":      review.reset_index(drop=True),
+        "excluded":    excluded.reset_index(drop=True),
+        "all":         work.reset_index(drop=True),
     }
+
+    # ── مؤشر الشفافية: تحقق أن لا منتج ضاع ──
+    _total_in = len(work)
+    _total_out = sum(len(result[k]) for k in result if k != "all")
+    if _total_out < _total_in:
+        try:
+            st.toast(f"⚠️ تحذير: {_total_in - _total_out} منتج لم يُوزَّع!", icon="⚠️")
+        except Exception:
+            pass
+
+    return result
 
 
 # ── تحديث حي بدون مكوّنات مخصصة (streamlit-autorefresh يفشل غالباً على السحابة/الوكيل) ───────────────
@@ -666,6 +696,80 @@ def db_log(page, action, details=""):
     try: log_event(page, action, details)
     except: pass
 
+
+
+# ── ⚡ v33: دالة تنقل عامة بأسهم وأرقام صفحات ──────────────────────────
+def render_pagination(total_items: int, page_size: int, key_prefix: str) -> tuple:
+    """
+    شريط تنقل موحّد بأسهم وأرقام صفحات.
+    يُعيد (start_idx, end_idx, current_page)
+    """
+    if total_items <= 0:
+        return 0, 0, 1
+    total_pages = max(1, (total_items + page_size - 1) // page_size)
+    # ── تتبع الصفحة في session_state ──
+    pg_key = f"_pg_{key_prefix}"
+    if pg_key not in st.session_state:
+        st.session_state[pg_key] = 1
+    current = int(st.session_state[pg_key])
+    current = max(1, min(current, total_pages))
+
+    if total_pages <= 1:
+        st.caption(f"عرض {total_items} منتج")
+        return 0, total_items, 1
+
+    # ── أزرار التنقل ──
+    # حساب أرقام الصفحات المعروضة (max 7)
+    if total_pages <= 7:
+        pages_to_show = list(range(1, total_pages + 1))
+    else:
+        pages_to_show = []
+        if current <= 4:
+            pages_to_show = [1, 2, 3, 4, 5, -1, total_pages]
+        elif current >= total_pages - 3:
+            pages_to_show = [1, -1, total_pages-4, total_pages-3, total_pages-2, total_pages-1, total_pages]
+        else:
+            pages_to_show = [1, -1, current-1, current, current+1, -1, total_pages]
+
+    # عدد الأعمدة = سهم + أرقام + سهم + عداد
+    n_btns = len(pages_to_show)
+    cols = st.columns([1] + [1]*n_btns + [1] + [3])
+
+    # سهم السابقة
+    with cols[0]:
+        if st.button("◀", key=f"{key_prefix}_prev", disabled=(current <= 1), help="الصفحة السابقة"):
+            st.session_state[pg_key] = current - 1
+            st.rerun()
+
+    # أرقام الصفحات
+    for i, pg in enumerate(pages_to_show):
+        with cols[i + 1]:
+            if pg == -1:
+                st.markdown('<div style="text-align:center;padding:6px;color:#555">…</div>', unsafe_allow_html=True)
+            elif pg == current:
+                st.markdown(
+                    f'<div style="text-align:center;padding:4px 8px;background:#6C63FF;color:white;'
+                    f'border-radius:8px;font-weight:700;font-size:.9rem">{pg}</div>',
+                    unsafe_allow_html=True,
+                )
+            else:
+                if st.button(str(pg), key=f"{key_prefix}_pg{pg}"):
+                    st.session_state[pg_key] = pg
+                    st.rerun()
+
+    # سهم التالية
+    with cols[n_btns + 1]:
+        if st.button("▶", key=f"{key_prefix}_next", disabled=(current >= total_pages), help="الصفحة التالية"):
+            st.session_state[pg_key] = current + 1
+            st.rerun()
+
+    # عداد
+    start = (current - 1) * page_size
+    end = min(start + page_size, total_items)
+    with cols[n_btns + 2]:
+        st.caption(f"عرض {start+1}-{end} من {total_items}")
+
+    return start, end, current
 
 
 def _calc_priority_score(row):
@@ -1549,39 +1653,8 @@ def render_pro_table(df, prefix, section_type="update", show_search=True,
     _show_transparency_counter(len(df), max(0, len(filtered) - _hidden_in_view))
     st.caption(f"عرض {len(filtered)} من {len(df)} منتج — {datetime.now().strftime('%H:%M:%S')}")
 
-    # ── v32: Enhanced Pagination ─────────────────────
-    PAGE_SIZE = 25
-    total_items = len(filtered)
-    total_pages = max(1, (total_items + PAGE_SIZE - 1) // PAGE_SIZE)
-
-    # Top pagination controls
-    _pg_col1, _pg_col2, _pg_col3 = st.columns([1, 2, 1])
-    with _pg_col2:
-        page_num = st.number_input(
-            f"صفحة (من {total_pages})",
-            min_value=1, max_value=total_pages, value=1,
-            key=f"{prefix}_page_num"
-        )
-        _showing = min(PAGE_SIZE, total_items - (page_num - 1) * PAGE_SIZE)
-        st.caption(f"عرض {_showing} من {total_items} منتج")
-    with _pg_col1:
-        if total_pages > 1:
-            st.markdown(
-                f'<div style="text-align:center;padding:8px;color:#9CA3AF;font-size:.8rem">'
-                f'الصفحة {page_num} من {total_pages}</div>',
-                unsafe_allow_html=True,
-            )
-    with _pg_col3:
-        if total_pages > 1:
-            _pct_done = int((page_num / total_pages) * 100)
-            st.markdown(
-                f'<div style="margin:8px auto;width:90%;height:6px;background:#1F2937;border-radius:3px;overflow:hidden">'
-                f'<div style="width:{_pct_done}%;height:100%;background:#6C63FF;border-radius:3px"></div></div>',
-                unsafe_allow_html=True,
-            )
-
-    start_idx = (page_num - 1) * PAGE_SIZE
-    end_idx = min(start_idx + PAGE_SIZE, total_items)
+    # ── v33: تنقل موحّد بأسهم وأرقام صفحات ──
+    start_idx, end_idx, _pg_num = render_pagination(len(filtered), 25, f"{prefix}_pro")
     page_df = filtered.iloc[start_idx:end_idx]
 
 
@@ -4392,11 +4465,9 @@ elif page == "🔍 منتجات مفقودة":
                         st.error(f"❌ تعذّر الفحص: {_e_dup}")
 
             # ── عرض المنتجات ──────────────────────────────────────────────
-            PAGE_SIZE = 20
-            total_p = len(filtered)
-            tp = max(1, (total_p + PAGE_SIZE - 1) // PAGE_SIZE)
-            pn = st.number_input("الصفحة", 1, tp, 1, key="miss_pg") if tp > 1 else 1
-            page_df = filtered.iloc[(pn-1)*PAGE_SIZE : pn*PAGE_SIZE]
+            # ── v33: تنقل موحّد بأسهم وأرقام صفحات ──
+            _ms, _me, _mp = render_pagination(len(filtered), 20, "miss")
+            page_df = filtered.iloc[_ms:_me]
 
             for idx, row in page_df.iterrows():
                 name  = str(row.get("منتج_المنافس", ""))
@@ -4750,10 +4821,9 @@ elif page == "⚠️ تحت المراجعة":
             st.caption(f"{len(df_rv)} منتج للمراجعة")
 
             # ── عرض المقارنة جنباً إلى جنب ────────────────────────────────
-            PAGE_SIZE = 15
-            tp = max(1, (len(df_rv) + PAGE_SIZE - 1) // PAGE_SIZE)
-            pn = st.number_input("الصفحة", 1, tp, 1, key="rv_pg") if tp > 1 else 1
-            page_rv = df_rv.iloc[(pn-1)*PAGE_SIZE : pn*PAGE_SIZE]
+            # ── v33: تنقل موحّد بأسهم وأرقام صفحات ──
+            _rs, _re, _rp = render_pagination(len(df_rv), 15, "review")
+            page_rv = df_rv.iloc[_rs:_re]
 
             for idx, row in page_rv.iterrows():
                 our_name   = str(row.get("المنتج",""))
