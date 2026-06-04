@@ -942,7 +942,7 @@ def extract_size(text):
     ml = re.findall(r'(\d+(?:\.\d+)?)\s*(?:ml|مل|ملي|milliliter)', tl)
     return float(ml[0]) if ml else 0.0
 
-@functools.lru_cache(maxsize=2000)
+@_functools.lru_cache(maxsize=2000)
 def extract_brand(text):
     if not isinstance(text, str): return ""
     n = normalize(text)
