@@ -1809,11 +1809,14 @@ def render_pro_table(df, prefix, section_type="update", show_search=True,
                            our_img=_our_img_v, comp_img=_comp_img_v,
                            comp_url=_comp_url_v, our_url=_our_url_v,
                            accent_border=_vs_border, row_bg=_vs_row_bg,
-                           compact=_vs_compact)
+                           compact=_vs_compact,
+                           all_comps=all_comps,
+                           brand=brand, size=str(size) if size else "",
+                           match_score=match_pct, risk=risk,
+                           match_date=str(row.get("تاريخ_المطابقة", "")))
         _sel_key = f"sel_{prefix}_{idx}"
         _chk_col, _card_col = st.columns([0.05, 0.95], gap="small")
         with _chk_col:
-            # Vertical nudge so checkbox aligns with card body, not its top edge
             st.markdown(
                 "<div style='padding-top:28px'></div>",
                 unsafe_allow_html=True,
@@ -1826,71 +1829,6 @@ def render_pro_table(df, prefix, section_type="update", show_search=True,
             )
         with _card_col:
             st.markdown(_vs_html, unsafe_allow_html=True)
-
-        # شريط المعلومات
-        match_color = ("#00C853" if match_pct >= 90
-                       else "#FFD600" if match_pct >= 70 else "#FF1744")
-        risk_html = ""
-        if risk:
-            rc = {"حرج": "#FF1744", "عالي": "#FF1744", "متوسط": "#FFD600", "منخفض": "#00C853", "عادي": "#00C853"}.get(risk.replace("🔴 ","").replace("🟡 ","").replace("🟢 ",""), "#888")
-            risk_html = f'<span style="color:{rc};font-size:.75rem;font-weight:700">⚡{risk}</span>'
-
-        # تاريخ آخر تغيير سعر
-        ph = get_price_history(our_name, comp_src, limit=2)
-        price_change_html = ""
-        if len(ph) >= 2:
-            old_p = ph[1]["price"]
-            chg = ph[0]["price"] - old_p
-            chg_c = "#FF1744" if chg > 0 else "#00C853"
-            price_change_html = f'<span style="color:{chg_c};font-size:.7rem">{"▲" if chg>0 else "▼"}{abs(chg):.0f} منذ {ph[1]["date"]}</span>'
-
-        # قرار معلق؟
-        pend = st.session_state.decisions_pending.get(our_name, {})
-        pend_html = decision_badge(pend.get("action", "")) if pend else ""
-
-        # Phase 2: competitor domain badge (lightweight HTML, no widget)
-        _comp_badge = (
-            f'<span style="background:#1a2a3a;color:#4fc3f7;padding:1px 6px;'
-            f'border-radius:4px;font-size:.7rem;font-weight:600">'
-            f'🏪 {html.escape(comp_src[:30])}</span>'
-            if comp_src and comp_src not in ("—", "غير محدد", "")
-            else ""
-        )
-
-        _no_val_disp = str(
-            row.get("No.", "") or row.get("NO", "") or row.get("no", "")
-            or row.get("No", "") or row.get("رقم_المنتج", "") or ""
-        ).strip()
-        try:
-            _fv = float(_no_val_disp)
-            _no_val_disp = str(int(_fv)) if _fv == int(_fv) else _no_val_disp
-        except (ValueError, TypeError):
-            pass
-        if _no_val_disp in ("nan", "None", "NaN"):
-            _no_val_disp = ""
-        _no_badge = (
-            f'<span style="background:#2a1a3a;color:#ce93d8;padding:1px 6px;'
-            f'border-radius:4px;font-size:.7rem;font-weight:700">'
-            f'#️⃣ NO: {html.escape(_no_val_disp)}</span>'
-            if _no_val_disp else ""
-        )
-
-        st.markdown(f"""
-        <div style="display:flex;justify-content:space-between;align-items:center;
-                    padding:3px 12px;font-size:.8rem;flex-wrap:wrap;gap:4px;">
-          <span>🏷️ <b>{brand}</b> {size} {ptype}</span>
-          {_no_badge}
-          {_comp_badge}
-          <span>تطابق: <b style="color:{match_color}">{match_pct:.0f}%</b></span>
-          {risk_html}
-          {price_change_html}
-          {pend_html}
-          {ts_badge(ts_now)}
-        </div>""", unsafe_allow_html=True)
-
-        # شريط المنافسين المصغر — يعرض كل المنافسين بأسعارهم بعد التطبيع وإزالة التكرار
-        if all_comps:
-            st.markdown(comp_strip(all_comps), unsafe_allow_html=True)
 
         # ── شريط الإجراءات التفاعلي (Event-Driven via on_click) ─────────
         if prefix in ("raise", "lower"):

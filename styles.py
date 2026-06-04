@@ -1,8 +1,9 @@
 """
-styles.py - التصميم v20.0 — بطاقات محسنة + عرض المنافسين
+styles.py - v31.7 — بطاقات ذكية احترافية + عرض كل المنافسين بصورهم
 """
 from html import escape as _html_escape
 from textwrap import dedent
+from datetime import datetime
 
 
 def get_styles():
@@ -13,215 +14,329 @@ def get_main_css():
 @import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@400;700;900&display=swap');
 *{font-family:'Tajawal',sans-serif!important}
 .main .block-container{max-width:1400px;padding:1rem 2rem}
-.stat-card{background:#1A1A2E;border-radius:12px;padding:16px;text-align:center;border:1px solid #333344}
-.stat-card:hover{box-shadow:0 4px 16px rgba(108,99,255,.15);border-color:#6C63FF}
+
+/* ── Stat Cards ── */
+.stat-card{background:#111827;border-radius:12px;padding:16px;text-align:center;border:1px solid #1F293788;transition:all .3s ease}
+.stat-card:hover{transform:translateY(-2px);box-shadow:0 8px 25px rgba(108,99,255,.2);border-color:#6C63FF}
 .stat-card .num{font-size:2.2rem;font-weight:900;margin:4px 0}
 .stat-card .lbl{font-size:.85rem;color:#8B8B8B}
-.cmp-table{width:100%;border-collapse:separate;border-spacing:0;border-radius:8px;overflow:hidden;font-size:.88rem}
-.cmp-table thead th{background:#16213e;color:#fff;padding:10px 8px;font-weight:700;text-align:center;border-bottom:2px solid #6C63FF;position:sticky;top:0;z-index:10}
-.cmp-table tbody tr:nth-child(even){background:rgba(26,26,46,.4)}
-.cmp-table tbody tr:hover{background:rgba(108,99,255,.1)!important}
-.cmp-table td{padding:8px 6px;text-align:center;border-bottom:1px solid rgba(51,51,68,.4);vertical-align:middle}
-.td-our{background:rgba(108,99,255,.06)!important;border-right:3px solid #6C63FF;text-align:right!important;font-weight:600;color:#B8B4FF;max-width:250px;word-wrap:break-word}
-.td-comp{background:rgba(255,152,0,.06)!important;border-left:3px solid #ff9800;text-align:right!important;font-weight:600;color:#FFD180;max-width:250px;word-wrap:break-word}
-.badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:.75rem;font-weight:700}
-.b-high{background:rgba(255,23,68,.15);color:#FF1744;border:1px solid #FF1744}
-.b-med{background:rgba(255,214,0,.15);color:#FFD600;border:1px solid #FFD600}
-.b-low{background:rgba(0,200,83,.15);color:#00C853;border:1px solid #00C853}
-.conf-bar{width:100%;height:6px;background:rgba(255,255,255,.08);border-radius:3px;overflow:hidden}
-.conf-fill{height:100%;border-radius:3px}
-/* ── بطاقة VS المحسنة مع المنافسين ── */
-.vs-row{display:grid;grid-template-columns:1fr 36px 1fr;gap:10px;align-items:center;padding:12px;background:#1A1A2E;border-radius:8px 8px 0 0;margin:5px 0 0 0;border:1px solid #333344;border-bottom:none}
-.vs-badge{background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:.7rem}
-.our-s{text-align:right;padding:8px;background:rgba(108,99,255,.04);border-radius:6px;border-right:3px solid #6C63FF}
-.comp-s{text-align:left;padding:8px;background:rgba(255,152,0,.04);border-radius:6px;border-left:3px solid #ff9800}
-.action-btn{display:inline-block;padding:4px 10px;border-radius:6px;font-size:.75rem;font-weight:700;cursor:pointer;margin:2px;border:1px solid}
-.btn-approve{background:rgba(0,200,83,.1);color:#00C853;border-color:#00C853}
-.btn-remove{background:rgba(255,23,68,.1);color:#FF1744;border-color:#FF1744}
-.btn-delay{background:rgba(255,152,0,.1);color:#ff9800;border-color:#ff9800}
-.btn-export{background:rgba(108,99,255,.1);color:#6C63FF;border-color:#6C63FF}
-.ai-box{background:#1A1A2E;padding:12px;border-radius:8px;border:1px solid #333344;margin:6px 0}
-.paste-area{background:#0E1117;border:2px dashed #333344;border-radius:8px;padding:12px;min-height:80px}
-.multi-comp{background:rgba(0,123,255,.06);border:1px solid rgba(0,123,255,.2);border-radius:6px;padding:8px;margin:4px 0}
-/* ── شريط المنافسين المصغر ── */
-.comp-strip{background:#0e1628;border:1px solid #333344;border-top:none;border-radius:0 0 8px 8px;padding:8px 12px;margin:0 0 2px 0;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
-.comp-chip{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:14px;font-size:.72rem;font-weight:600;border:1px solid;white-space:nowrap}
-.comp-chip.leader{background:rgba(255,152,0,.12);border-color:#ff9800;color:#ffb74d}
-.comp-chip.normal{background:rgba(108,99,255,.08);border-color:#333366;color:#9e9eff}
-.comp-chip .cp-name{max-width:100px;overflow:hidden;text-overflow:ellipsis}
-.comp-chip .cp-price{font-weight:900}
-/* ── بطاقة المنتج المفقود المحسنة ── */
-.miss-card{border-radius:10px;padding:14px;margin:6px 0;background:linear-gradient(135deg,#0a1628,#0e1a30)}
+
+/* ── بطاقة المنتج الذكية v31.7 ── */
+.smart-card{background:#111827;border:1px solid #1F293788;border-radius:12px;margin:10px 0;overflow:hidden;transition:all .3s ease}
+.smart-card:hover{border-color:#6C63FF55;box-shadow:0 4px 20px rgba(108,99,255,.12)}
+
+.smart-card-header{display:flex;align-items:center;gap:14px;padding:14px 16px;border-bottom:1px solid #1F293744;direction:rtl}
+.smart-card-img{width:64px;height:64px;border-radius:10px;object-fit:cover;border:2px solid #6C63FF;flex-shrink:0;background:#0e1628}
+.smart-card-info{flex:1;min-width:0}
+.smart-card-name{font-weight:700;color:#E2E8F0;font-size:.95rem;line-height:1.4;word-wrap:break-word}
+.smart-card-meta{font-size:.72rem;color:#64748B;margin-top:3px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.smart-card-meta span{display:inline-flex;align-items:center;gap:2px}
+.smart-card-price-box{text-align:center;min-width:90px;flex-shrink:0;padding:6px 10px;background:rgba(108,99,255,.08);border-radius:8px}
+.smart-card-our-price{font-size:1.3rem;font-weight:900;color:#818CF8}
+.smart-card-our-label{font-size:.62rem;color:#64748B}
+
+/* ── شريط المنافسين v31.7 ── */
+.comp-list{padding:0 16px 12px;direction:rtl}
+.comp-list-title{font-size:.72rem;color:#64748B;margin-bottom:6px;display:flex;align-items:center;gap:4px}
+.comp-item{display:flex;align-items:center;gap:10px;padding:8px 10px;background:rgba(15,23,42,.6);border:1px solid #1F293766;border-radius:8px;margin:4px 0;transition:all .2s ease}
+.comp-item:hover{border-color:#F59E0B44;background:rgba(245,158,11,.04)}
+.comp-item.leader{border-color:#F59E0B55;background:rgba(245,158,11,.06)}
+.comp-item-img{width:44px;height:44px;border-radius:8px;object-fit:cover;border:1px solid #333;flex-shrink:0;background:#0e1628}
+.comp-item-info{flex:1;min-width:0}
+.comp-item-store{font-weight:700;font-size:.78rem;color:#F59E0B;display:flex;align-items:center;gap:4px}
+.comp-item-name{font-size:.72rem;color:#94A3B8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:280px}
+.comp-item-size{font-size:.62rem;color:#64748B}
+.comp-item-price-box{text-align:center;min-width:80px;flex-shrink:0}
+.comp-item-price{font-size:1rem;font-weight:900}
+.comp-item-diff{font-size:.62rem;font-weight:600;margin-top:1px}
+
+/* ── شريط الإجراءات والفرق ── */
+.smart-card-footer{display:flex;justify-content:space-between;align-items:center;padding:8px 16px;background:rgba(15,23,42,.4);border-top:1px solid #1F293744;direction:rtl}
+.diff-badge{padding:3px 10px;border-radius:8px;font-size:.78rem;font-weight:700;display:inline-flex;align-items:center;gap:4px}
+.diff-red{background:rgba(239,68,68,.12);color:#EF4444;border:1px solid #EF444433}
+.diff-green{background:rgba(16,185,129,.12);color:#10B981;border:1px solid #10B98133}
+.diff-yellow{background:rgba(245,158,11,.12);color:#F59E0B;border:1px solid #F59E0B33}
+.card-date{font-size:.58rem;color:#475569}
+
+/* ── البطاقة المفقودة v31.7 ── */
+.miss-card{border-radius:12px;padding:14px;margin:8px 0;background:linear-gradient(135deg,#0B0F19,#111827);border:1px solid #1F293788;transition:all .3s ease}
+.miss-card:hover{border-color:#0EA5E944;box-shadow:0 4px 16px rgba(14,165,233,.08)}
 .miss-card .miss-header{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
 .miss-card .miss-info{flex:1;min-width:0}
 .miss-card .miss-thumb{flex-shrink:0}
-.miss-card .miss-name{font-weight:700;color:#4fc3f7;font-size:1rem}
-.miss-card .miss-meta{font-size:.75rem;color:#888;margin-top:4px}
+.miss-card .miss-name{font-weight:700;color:#38BDF8;font-size:1rem}
+.miss-card .miss-meta{font-size:.75rem;color:#64748B;margin-top:4px}
 .miss-card .miss-prices{text-align:left;min-width:120px}
-.miss-card .miss-comp-price{font-size:1.2rem;font-weight:900;color:#ff9800}
-.miss-card .miss-suggested{font-size:.72rem;color:#4caf50}
-/* ── شارات الثقة ── */
-.trust-badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:.68rem;font-weight:700;margin-right:4px}
-.trust-green{background:rgba(0,200,83,.15);color:#00C853;border:1px solid #00C85366}
-.trust-yellow{background:rgba(255,214,0,.15);color:#FFD600;border:1px solid #FFD60066}
-.trust-red{background:rgba(255,23,68,.15);color:#FF1744;border:1px solid #FF174466}
-section[data-testid="stSidebar"]{background:linear-gradient(180deg,#0E1117,#1A1A2E);transition:all .3s ease}
+.miss-card .miss-comp-price{font-size:1.2rem;font-weight:900;color:#F59E0B}
+.miss-card .miss-suggested{font-size:.72rem;color:#10B981}
+
+/* ── شارات ── */
+.badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:.75rem;font-weight:700}
+.b-high{background:rgba(239,68,68,.12);color:#EF4444;border:1px solid #EF444433}
+.b-med{background:rgba(245,158,11,.12);color:#F59E0B;border:1px solid #F59E0B33}
+.b-low{background:rgba(16,185,129,.12);color:#10B981;border:1px solid #10B98133}
+.trust-badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:.68rem;font-weight:700;margin-left:4px}
+.trust-green{background:rgba(16,185,129,.12);color:#10B981;border:1px solid #10B98133}
+.trust-yellow{background:rgba(245,158,11,.12);color:#F59E0B;border:1px solid #F59E0B33}
+.trust-red{background:rgba(239,68,68,.12);color:#EF4444;border:1px solid #EF444433}
+.priority-badge{display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border-radius:10px;font-size:.68rem;font-weight:700}
+.priority-high{background:rgba(239,68,68,.12);color:#EF4444;border:1px solid #EF444433}
+.priority-med{background:rgba(245,158,11,.12);color:#F59E0B;border:1px solid #F59E0B33}
+.priority-low{background:rgba(16,185,129,.12);color:#10B981;border:1px solid #10B98133}
+
+/* ── Table ── */
+.cmp-table{width:100%;border-collapse:separate;border-spacing:0;border-radius:8px;overflow:hidden;font-size:.88rem}
+.cmp-table thead th{background:#111827;color:#fff;padding:10px 8px;font-weight:700;text-align:center;border-bottom:2px solid #6C63FF;position:sticky;top:0;z-index:10}
+.cmp-table tbody tr:nth-child(even){background:rgba(17,24,39,.4)}
+.cmp-table tbody tr:hover{background:rgba(108,99,255,.06)!important}
+.cmp-table td{padding:8px 6px;text-align:center;border-bottom:1px solid #1F293744;vertical-align:middle}
+.td-our{background:rgba(108,99,255,.04)!important;border-right:3px solid #6C63FF;text-align:right!important;font-weight:600;color:#C4B5FD;max-width:250px;word-wrap:break-word}
+.td-comp{background:rgba(245,158,11,.04)!important;border-left:3px solid #F59E0B;text-align:right!important;font-weight:600;color:#FCD34D;max-width:250px;word-wrap:break-word}
+
+/* ── Buttons ── */
+.action-btn{display:inline-block;padding:4px 10px;border-radius:6px;font-size:.75rem;font-weight:700;cursor:pointer;margin:2px;border:1px solid}
+.btn-approve{background:rgba(16,185,129,.08);color:#10B981;border-color:#10B981}
+.btn-remove{background:rgba(239,68,68,.08);color:#EF4444;border-color:#EF4444}
+.btn-delay{background:rgba(245,158,11,.08);color:#F59E0B;border-color:#F59E0B}
+.btn-export{background:rgba(108,99,255,.08);color:#818CF8;border-color:#818CF8}
+.ai-box{background:#111827;padding:12px;border-radius:8px;border:1px solid #1F293788;margin:6px 0}
+.paste-area{background:#0E1117;border:2px dashed #1F2937;border-radius:8px;padding:12px;min-height:80px}
+.multi-comp{background:rgba(14,165,233,.04);border:1px solid rgba(14,165,233,.15);border-radius:6px;padding:8px;margin:4px 0}
+.conf-bar{width:100%;height:6px;background:rgba(255,255,255,.06);border-radius:3px;overflow:hidden}
+.conf-fill{height:100%;border-radius:3px}
+
+/* ── Layout ── */
+section[data-testid="stSidebar"]{background:linear-gradient(180deg,#0E1117,#111827);transition:all .3s ease}
 #MainMenu,footer{visibility:hidden}
-/* header يبقى ظاهراً لأنه يحتوي على زر إظهار القائمة الجانبية */
-header[data-testid="stHeader"] {
-    background: transparent !important;
-    backdrop-filter: none !important;
-}
-/* إصلاح أيقونات Streamlit */
+header[data-testid="stHeader"]{background:transparent!important;backdrop-filter:none!important}
 [data-testid="stExpander"] summary svg,
 [data-testid="stSelectbox"] svg[data-testid="stExpanderToggleIcon"],
-details summary span[data-testid] svg {
-    font-family: system-ui, -apple-system, sans-serif !important;
-}
-[data-testid="stExpander"] summary {
-    direction: rtl;
-    font-family: 'Tajawal', sans-serif !important;
-}
-.stSelectbox label, .stMultiSelect label {
-    direction: rtl;
-    font-family: 'Tajawal', sans-serif !important;
-}
-/* ── زر «التدقيق والتحسين» — نفس إحساس صفوف الراديو (أقسام) ── */
-section[data-testid="stSidebar"] .st-key-nav_audit_tools button[data-testid="stBaseButton-secondary"],
-section[data-testid="stSidebar"] .st-key-nav_audit_tools button[data-testid="stBaseButton-tertiary"] {
-    background: transparent !important;
-    border: 1px solid rgba(51, 51, 68, 0.45) !important;
-    border-radius: 8px !important;
-    color: rgba(250, 250, 250, 0.95) !important;
-    font-weight: 400 !important;
-    font-size: 0.9375rem !important;
-    padding: 0.3rem 0.65rem !important;
-    min-height: 2.15rem !important;
-    box-shadow: none !important;
-    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease !important;
-}
-section[data-testid="stSidebar"] .st-key-nav_audit_tools button[data-testid="stBaseButton-secondary"]:hover,
-section[data-testid="stSidebar"] .st-key-nav_audit_tools button[data-testid="stBaseButton-secondary"]:focus-visible,
-section[data-testid="stSidebar"] .st-key-nav_audit_tools button[data-testid="stBaseButton-tertiary"]:hover,
-section[data-testid="stSidebar"] .st-key-nav_audit_tools button[data-testid="stBaseButton-tertiary"]:focus-visible {
-    background: rgba(108, 99, 255, 0.12) !important;
-    border-color: rgba(108, 99, 255, 0.45) !important;
-    color: #fff !important;
-}
-section[data-testid="stSidebar"] .st-key-nav_audit_tools button p {
-    font-family: 'Tajawal', sans-serif !important;
-    font-size: 0.9375rem !important;
-}
-/* ── زر القائمة الجانبية ── منقول إلى get_sidebar_toggle_js */
-/* ── v32: Enhanced Design System ── */
-.stat-card{background:#111827!important;border:1px solid #1F293788!important;transition:all .3s ease}
-.stat-card:hover{transform:translateY(-2px);box-shadow:0 8px 25px rgba(108,99,255,.2)!important;border-color:#6C63FF!important}
-.vs-row{background:#111827!important;border:1px solid #1F293788!important}
-.comp-strip{background:#0d1117!important;border:1px solid #1F293788!important;border-top:none!important}
-/* Priority badge */
-.priority-badge{display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border-radius:10px;font-size:.68rem;font-weight:700}
-.priority-high{background:rgba(255,23,68,.12);color:#FF1744;border:1px solid #FF174444}
-.priority-med{background:rgba(255,214,0,.12);color:#FFD600;border:1px solid #FFD60044}
-.priority-low{background:rgba(0,200,83,.12);color:#00C853;border:1px solid #00C85344}
-/* Pagination styling */
+details summary span[data-testid] svg{font-family:system-ui,-apple-system,sans-serif!important}
+[data-testid="stExpander"] summary{direction:rtl;font-family:'Tajawal',sans-serif!important}
+.stSelectbox label,.stMultiSelect label{direction:rtl;font-family:'Tajawal',sans-serif!important}
 .st-key-page_num input{text-align:center!important;font-size:1.1rem!important;font-weight:700!important}
-/* Better card gradients */
-.ai-box{background:#111827!important;border:1px solid #1F293788!important}
-.miss-card{background:linear-gradient(135deg,#0B0F19,#111827)!important}
-/* Smoother transitions */
 *{transition:color .15s ease,background .15s ease,border-color .15s ease}
 button[data-testid]{transition:all .2s ease!important}
 button[data-testid]:hover{transform:translateY(-1px)!important}
-/* Health score animation */
-@keyframes pulse-health{0%{opacity:1}50%{opacity:.85}100%{opacity:1}}
+
+/* ── Sidebar Audit Button ── */
+section[data-testid="stSidebar"] .st-key-nav_audit_tools button[data-testid="stBaseButton-secondary"],
+section[data-testid="stSidebar"] .st-key-nav_audit_tools button[data-testid="stBaseButton-tertiary"]{
+    background:transparent!important;border:1px solid rgba(51,51,68,.45)!important;border-radius:8px!important;
+    color:rgba(250,250,250,.95)!important;font-weight:400!important;font-size:.9375rem!important;
+    padding:.3rem .65rem!important;min-height:2.15rem!important;box-shadow:none!important;
+    transition:background .15s ease,border-color .15s ease,color .15s ease!important}
+section[data-testid="stSidebar"] .st-key-nav_audit_tools button:hover,
+section[data-testid="stSidebar"] .st-key-nav_audit_tools button:focus-visible{
+    background:rgba(108,99,255,.12)!important;border-color:rgba(108,99,255,.45)!important;color:#fff!important}
+section[data-testid="stSidebar"] .st-key-nav_audit_tools button p{font-family:'Tajawal',sans-serif!important;font-size:.9375rem!important}
 
 </style>"""
 
 
 def get_sidebar_toggle_js():
-    """CSS فقط لزر إخفاء/إظهار القائمة الجانبية — متوافق مع Streamlit Cloud"""
     return """<style>
-/* زر إخفاء/إظهار القائمة الجانبية — يستخدم الزر المدمج في Streamlit */
-[data-testid="collapsedControl"] {
-    color: #6C63FF !important;
-    background: linear-gradient(180deg,#6C63FF22,#4a42cc22) !important;
-    border: 1px solid #6C63FF44 !important;
-    border-radius: 0 8px 8px 0 !important;
-    transition: all .25s ease !important;
-}
-[data-testid="collapsedControl"]:hover {
-    background: linear-gradient(180deg,#6C63FF44,#4a42cc44) !important;
-    box-shadow: 3px 0 10px rgba(108,99,255,.4) !important;
-}
-</style>
-"""
+[data-testid="collapsedControl"]{color:#818CF8!important;background:linear-gradient(180deg,#818CF822,#6366F122)!important;border:1px solid #818CF844!important;border-radius:0 8px 8px 0!important;transition:all .25s ease!important}
+[data-testid="collapsedControl"]:hover{background:linear-gradient(180deg,#818CF844,#6366F144)!important;box-shadow:3px 0 10px rgba(129,140,248,.4)!important}
+</style>"""
 
 
-def stat_card(icon, label, value, color="#6C63FF"):
+def stat_card(icon, label, value, color="#818CF8"):
     return f'<div class="stat-card" style="border-top:3px solid {color}"><div style="font-size:1.3rem">{icon}</div><div class="num" style="color:{color}">{value}</div><div class="lbl">{label}</div></div>'
 
 
-def vs_card(our_name, our_price, comp_name, comp_price, diff, comp_source="", product_id="", our_img="", comp_img="",
-            comp_url="", our_url="", accent_border="", row_bg="", compact=False):
-    """بطاقة VS الأساسية — المنافس الرئيسي (الأقل سعراً) + صور اختيارية"""
-    # Defensive: ensure numeric types even if caller passes strings/Series
+def _safe_float(v, default=0.0):
     try:
-        our_price = float(our_price)
+        return float(v)
     except (TypeError, ValueError):
-        our_price = 0.0
-    try:
-        comp_price = float(comp_price)
-    except (TypeError, ValueError):
-        comp_price = 0.0
-    try:
-        diff = float(diff)
-    except (TypeError, ValueError):
-        diff = 0.0
-    dc = "#FF1744" if diff > 0 else "#00C853" if diff < 0 else "#FFD600"
-    src = f'<div style="font-size:.65rem;color:#666">{comp_source}</div>' if comp_source else ""
-    pid = str(product_id) if product_id and str(product_id) not in ("", "nan", "None", "0") else ""
-    pid_html = f'<div style="font-size:.65rem;color:#6C63FF99;margin-top:1px">#{pid}</div>' if pid else ""
-    # السعر المقترح = أقل من أقل منافس بريال
-    suggested = comp_price - 1 if comp_price > 0 else 0
-    sugg_html = ""
-    if suggested > 0 and diff > 10:
-        sugg_html = f'<div style="font-size:.7rem;color:#4caf50;margin-top:2px">مقترح: {suggested:,.0f} ر.س</div>'
-    ou = str(our_img or "").strip()
-    cu = str(comp_img or "").strip()
-    our_img_html = (
-        f'<img src="{_html_escape(ou, quote=True)}" style="width:44px;height:44px;border-radius:6px;object-fit:cover;margin-bottom:6px;border:1px solid #6C63FF">'
-        if ou and ou.lower() not in ("nan", "none")
-        else ""
-    )
-    comp_img_html = (
-        f'<img src="{_html_escape(cu, quote=True)}" style="width:44px;height:44px;border-radius:6px;object-fit:cover;margin-bottom:6px;border:1px solid #ff9800">'
-        if cu and cu.lower() not in ("nan", "none")
-        else ""
-    )
-    # Clickable product names
-    _our_url_s = str(our_url or "").strip()
-    _comp_url_s = str(comp_url or "").strip()
-    our_name_html = (
-        f'<a href="{_html_escape(_our_url_s, quote=True)}" target="_blank" style="color:#B8B4FF;text-decoration:none;font-weight:700;font-size:.9rem">{our_name}</a>'
-        if _our_url_s and _our_url_s.lower() not in ("nan", "none")
-        else f'<div style="font-weight:700;color:#B8B4FF;font-size:.9rem">{our_name}</div>'
-    )
-    comp_name_html = (
-        f'<a href="{_html_escape(_comp_url_s, quote=True)}" target="_blank" style="color:#FFD180;text-decoration:none;font-weight:700;font-size:.9rem">{comp_name}</a>'
-        if _comp_url_s and _comp_url_s.lower() not in ("nan", "none")
-        else f'<div style="font-weight:700;color:#FFD180;font-size:.9rem">{comp_name}</div>'
-    )
-    # Custom border/background
-    _border = accent_border if accent_border else "#333344"
-    _bg = row_bg if row_bg else "#1A1A2E"
-    # Compact mode: smaller padding
-    _pad = "8px" if compact else "12px"
-    return f'''<div class="vs-row" style="padding:{_pad};background:{_bg};border:1px solid {_border};border-radius:8px 8px 0 0;margin:5px 0 0 0;border-bottom:none">
-<div class="our-s">{our_img_html}<div style="font-size:.7rem;color:#8B8B8B">منتجنا</div>{our_name_html}{pid_html}<div style="font-size:1.1rem;font-weight:900;color:#6C63FF;margin-top:2px">{our_price:.0f} ر.س</div>{sugg_html}</div>
-<div class="vs-badge">VS</div>
-<div class="comp-s">{comp_img_html}<div style="font-size:.7rem;color:#8B8B8B">المنافس المتصدر</div>{comp_name_html}<div style="font-size:1.1rem;font-weight:900;color:#ff9800;margin-top:2px">{comp_price:.0f} ر.س</div>{src}</div>
-</div><div style="text-align:center;background:{_bg};padding:4px;border-left:1px solid {_border};border-right:1px solid {_border};margin:0"><span style="color:{dc};font-weight:700;font-size:.9rem">الفرق: {diff:+.0f} ر.س</span></div>'''
+        return default
 
+def _safe_str(v, fallback=""):
+    s = str(v or "").strip()
+    return fallback if s.lower() in ("", "nan", "none", "<na>") else s
+
+def _img_tag(url, w=64, h=64, border_color="#333", radius=10, css_class=""):
+    u = _safe_str(url)
+    if not u or not u.lower().startswith("http"):
+        return ""
+    eu = _html_escape(u, quote=True)
+    cls = f'class="{css_class}"' if css_class else ""
+    return (
+        f'<img {cls} src="{eu}" '
+        f'style="width:{w}px;height:{h}px;border-radius:{radius}px;object-fit:cover;'
+        f'border:1px solid {border_color};background:#0e1628;flex-shrink:0" '
+        f'loading="lazy" referrerpolicy="no-referrer" '
+        f'onerror="this.style.display=\'none\'" />'
+    )
+
+def _linked_name(name, url="", color="#E2E8F0", max_len=120):
+    safe = _html_escape(str(name or "")[:max_len])
+    u = _safe_str(url)
+    if u:
+        eu = _html_escape(u, quote=True)
+        return f'<a href="{eu}" target="_blank" style="color:{color};text-decoration:none" title="{_html_escape(str(name or ""), quote=True)}">{safe}</a>'
+    return f'<span style="color:{color}">{safe}</span>'
+
+
+def vs_card(our_name, our_price, comp_name, comp_price, diff, comp_source="",
+            product_id="", our_img="", comp_img="", comp_url="", our_url="",
+            accent_border="", row_bg="", compact=False,
+            all_comps=None, brand="", size="", match_score=0, risk="",
+            match_date=""):
+    """
+    بطاقة المنتج الذكية v31.7 — تعرض:
+    - صورة + اسم منتجنا كاملاً مع الماركة والحجم
+    - كل المنافسين بصورهم وأسعارهم مرتبين حسب السعر
+    - فرق السعر + شارة الخطورة + تاريخ صغير
+    """
+    our_price = _safe_float(our_price)
+    comp_price = _safe_float(comp_price)
+    diff = _safe_float(diff)
+    match_score = _safe_float(match_score)
+
+    pid = _safe_str(product_id)
+    pid_html = f'<span style="color:#64748B;font-size:.62rem">#{pid}</span>' if pid and pid != "0" else ""
+
+    brand_s = _safe_str(brand, "")
+    size_s = _safe_str(size, "")
+    match_s = f'{match_score:.0f}%' if match_score > 0 else ""
+
+    # Date
+    date_s = _safe_str(match_date, datetime.now().strftime("%Y-%m-%d"))
+
+    # ── Header: صورة منتجنا + اسمه الكامل + سعرنا ──
+    our_img_html = _img_tag(our_img, 64, 64, "#818CF8", 10, "smart-card-img")
+    our_name_html = _linked_name(our_name, our_url, "#E2E8F0", 200)
+
+    meta_parts = []
+    if brand_s: meta_parts.append(f'<span>🏷️ {_html_escape(brand_s)}</span>')
+    if size_s: meta_parts.append(f'<span>📏 {_html_escape(size_s)}</span>')
+    if match_s: meta_parts.append(f'<span>🎯 {match_s}</span>')
+    if pid_html: meta_parts.append(pid_html)
+    meta_html = " · ".join(meta_parts) if meta_parts else ""
+
+    header = f'''<div class="smart-card-header">
+{our_img_html}
+<div class="smart-card-info">
+<div class="smart-card-name">{our_name_html}</div>
+<div class="smart-card-meta">{meta_html}</div>
+</div>
+<div class="smart-card-price-box">
+<div class="smart-card-our-label">سعرنا</div>
+<div class="smart-card-our-price">{our_price:,.0f}</div>
+<div style="font-size:.58rem;color:#64748B">ر.س</div>
+</div>
+</div>'''
+
+    # ── Competitors List: كل المنافسين بصورهم مرتبين بالسعر ──
+    comp_rows = []
+
+    # Build competitor list
+    comps = []
+    if all_comps:
+        try:
+            import pandas as pd
+            if isinstance(all_comps, pd.DataFrame):
+                comps = all_comps.to_dict("records") if not all_comps.empty else []
+            elif isinstance(all_comps, list):
+                comps = [dict(c) if isinstance(c, dict) else c for c in all_comps]
+        except Exception:
+            if isinstance(all_comps, list):
+                comps = list(all_comps)
+
+    if not comps and comp_name:
+        comps = [{
+            "competitor": comp_source or "منافس",
+            "name": comp_name,
+            "price": comp_price,
+            "image_url": comp_img,
+            "product_url": comp_url,
+            "score": match_score,
+            "size": size_s,
+        }]
+
+    # Sort by price
+    comps = sorted(comps, key=lambda c: _safe_float(c.get("price", c.get("comp_price", 0))))
+
+    if comps:
+        for i, cm in enumerate(comps):
+            c_store = _safe_str(cm.get("competitor", ""), "منافس")
+            c_price_v = _safe_float(cm.get("price", cm.get("comp_price", 0)))
+            c_name = _safe_str(cm.get("name", ""), "—")
+            c_img_url = _safe_str(cm.get("image_url", cm.get("image", "")))
+            c_url = _safe_str(cm.get("product_url", cm.get("url", "")))
+            c_size = _safe_str(cm.get("size", ""), "")
+
+            is_leader = (i == 0)
+            leader_cls = "leader" if is_leader else ""
+            crown = "👑 " if is_leader else ""
+            price_color = "#F59E0B" if is_leader else "#94A3B8"
+
+            # Diff from our price
+            c_diff = our_price - c_price_v if (our_price > 0 and c_price_v > 0) else 0
+            if c_diff > 0:
+                diff_html = f'<div class="comp-item-diff" style="color:#EF4444">+{c_diff:,.0f}</div>'
+            elif c_diff < 0:
+                diff_html = f'<div class="comp-item-diff" style="color:#10B981">{c_diff:,.0f}</div>'
+            else:
+                diff_html = f'<div class="comp-item-diff" style="color:#F59E0B">= متساوي</div>'
+
+            c_img_html = _img_tag(c_img_url, 44, 44, "#F59E0B33" if is_leader else "#333", 8, "comp-item-img")
+            c_name_linked = _linked_name(c_name, c_url, "#94A3B8", 60)
+            size_html = f'<div class="comp-item-size">📏 {_html_escape(c_size)}</div>' if c_size else ""
+
+            comp_rows.append(f'''<div class="comp-item {leader_cls}">
+{c_img_html}
+<div class="comp-item-info">
+<div class="comp-item-store">{crown}{_html_escape(c_store)}</div>
+<div class="comp-item-name">{c_name_linked}</div>
+{size_html}
+</div>
+<div class="comp-item-price-box">
+<div class="comp-item-price" style="color:{price_color}">{c_price_v:,.0f} <span style="font-size:.6rem;color:#64748B">ر.س</span></div>
+{diff_html}
+</div>
+</div>''')
+
+    comp_count = len(comps)
+    comp_section = ""
+    if comp_rows:
+        comp_section = f'''<div class="comp-list">
+<div class="comp-list-title">👥 المنافسون ({comp_count}) — مرتبين بالسعر</div>
+{''.join(comp_rows)}
+</div>'''
+
+    # ── Footer: فرق السعر + خطورة + تاريخ ──
+    if diff > 0:
+        diff_cls = "diff-red"
+        diff_pct = f'+{(diff/comp_price*100):.0f}%' if comp_price > 0 else ""
+        diff_text = f'↑ أعلى بـ {diff:,.0f} ر.س {diff_pct}'
+    elif diff < 0:
+        diff_cls = "diff-green"
+        diff_pct = f'{(diff/comp_price*100):.0f}%' if comp_price > 0 else ""
+        diff_text = f'↓ أقل بـ {abs(diff):,.0f} ر.س {diff_pct}'
+    else:
+        diff_cls = "diff-yellow"
+        diff_text = '= سعر متساوي'
+
+    risk_s = _safe_str(risk, "")
+    risk_html = ""
+    if "حرج" in risk_s:
+        risk_html = '<span class="priority-badge priority-high">🔴 حرج</span>'
+    elif "متوسط" in risk_s:
+        risk_html = '<span class="priority-badge priority-med">🟡 متوسط</span>'
+    elif "منخفض" in risk_s:
+        risk_html = '<span class="priority-badge priority-low">🟢 منخفض</span>'
+
+    footer = f'''<div class="smart-card-footer">
+<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+<span class="diff-badge {diff_cls}">{diff_text}</span>
+{risk_html}
+</div>
+<div class="card-date">📅 {_html_escape(date_s)}</div>
+</div>'''
+
+    return f'<div class="smart-card">{header}{comp_section}{footer}</div>'
 
 
 def comp_strip(all_comps, our_price=None, rank_by_threat=False, show_threat_badge=False):
@@ -235,7 +350,6 @@ def comp_strip(all_comps, our_price=None, rank_by_threat=False, show_threat_badg
         return ""
     try:
         import pandas as pd
-
         _has_pd = True
     except ImportError:
         pd = None
@@ -253,7 +367,6 @@ def comp_strip(all_comps, our_price=None, rank_by_threat=False, show_threat_badg
     if rank_by_threat and our_price is not None and float(our_price) > 0:
         try:
             from utils.threat_score import rank_competitors_for_ui
-
             sorted_comps = rank_competitors_for_ui(work, float(our_price))
         except Exception:
             sorted_comps = sorted(
@@ -272,12 +385,11 @@ def comp_strip(all_comps, our_price=None, rank_by_threat=False, show_threat_badg
         c_img = str(cm.get("image_url", "") or cm.get("image", "") or "").strip()
         is_leader = (i == 0)
         crown = "👑" if is_leader else ""
-        bg = "rgba(255,152,0,.10)" if is_leader else "rgba(108,99,255,.05)"
-        border = "#ff9800" if is_leader else "#333366"
-        name_color = "#ffb74d" if is_leader else "#9e9eff"
-        # اسم المنتج لدى المنافس (مختصر)
+        bg = "rgba(245,158,11,.06)" if is_leader else "rgba(108,99,255,.03)"
+        border = "#F59E0B55" if is_leader else "#1F293766"
+        name_color = "#F59E0B" if is_leader else "#94A3B8"
         short_pname = c_pname[:50] + ".." if len(c_pname) > 50 else c_pname
-        score_html = f'<span style="color:#888;font-size:.62rem">{c_score:.0f}%</span>' if c_score > 0 else ""
+        score_html = f'<span style="color:#64748B;font-size:.62rem">{c_score:.0f}%</span>' if c_score > 0 else ""
         threat_html = ""
         if show_threat_badge and cm.get("threat_score") is not None:
             try:
@@ -288,36 +400,29 @@ def comp_strip(all_comps, our_price=None, rank_by_threat=False, show_threat_badg
                 )
             except (TypeError, ValueError):
                 threat_html = ""
-        img_html = (
-            f'<img src="{_html_escape(c_img, quote=True)}" '
-            f'style="width:50px;height:50px;border-radius:10px;object-fit:cover;'
-            f'border:1px solid {border};background:#0e1628;flex:0 0 50px" '
-            f'onerror="this.style.display=\'none\'" />'
-            if c_img and c_img.lower() not in ("nan", "none")
-            else ""
-        )
+        img_html = _img_tag(c_img, 44, 44, border, 8)
         rows.append(
             f'<div style="display:flex;justify-content:space-between;align-items:center;'
-            f'padding:5px 10px;background:{bg};border:1px solid {border};border-radius:8px;'
-            f'margin:2px 0;gap:8px;flex-wrap:wrap">'
+            f'padding:6px 10px;background:{bg};border:1px solid {border};border-radius:8px;'
+            f'margin:3px 0;gap:8px;flex-wrap:wrap">'
             f'<div style="display:flex;align-items:center;gap:6px;flex:1;min-width:0">'
             f'{img_html}'
             f'<span style="font-weight:900;font-size:.8rem">{crown}</span>'
             f'<span style="font-weight:700;color:{name_color};font-size:.75rem;white-space:nowrap">{c_store}</span>'
-            f'<span style="color:#aaa;font-size:.7rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:300px" title="{c_pname}">{short_pname}</span>'
+            f'<span style="color:#94A3B8;font-size:.7rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:300px" title="{c_pname}">{short_pname}</span>'
             f'{score_html}{threat_html}'
             f'</div>'
-            f'<span style="font-weight:900;color:{"#ff9800" if is_leader else "#9e9eff"};font-size:.85rem;white-space:nowrap">{c_price:,.0f} ر.س</span>'
+            f'<span style="font-weight:900;color:{"#F59E0B" if is_leader else "#94A3B8"};font-size:.85rem;white-space:nowrap">{c_price:,.0f} ر.س</span>'
             f'</div>'
         )
-    return f'<div class="comp-strip" style="flex-direction:column;gap:2px">{chr(10).join(rows)}</div>'
+    return f'<div class="comp-strip" style="flex-direction:column;gap:2px;background:#0d1117;border:1px solid #1F293788;border-top:none;border-radius:0 0 8px 8px;padding:8px 12px;margin:0 0 2px 0">{chr(10).join(rows)}</div>'
 
 
 def miss_card(name, price, brand, size, ptype, comp, suggested_price,
-              note="", variant_html="", tester_badge="", border_color="#007bff44",
+              note="", variant_html="", tester_badge="", border_color="#0EA5E933",
               confidence_level="green", confidence_score=0, image_url="",
               product_id="", comp_url="", title_override=""):
-    """بطاقة المنتج المفقود — HTML بدون مسافات بادئة (تجنب تفسير Markdown ككتلة كود)."""
+    """بطاقة المنتج المفقود v31.7"""
     safe_name = _html_escape(str(name or ""))
     safe_brand = _html_escape(str(brand or "—"))
     safe_size = _html_escape(str(size or "—"))
@@ -332,31 +437,24 @@ def miss_card(name, price, brand, size, ptype, comp, suggested_price,
     t_cls, t_lbl = trust_map.get(confidence_level, ("trust-green", "مؤكد"))
     trust_html = f'<span class="trust-badge {t_cls}">{t_lbl}</span>' if confidence_level != "green" else ""
 
-    note_html = f'<div style="font-size:.72rem;color:#ff9800;margin-top:4px">{safe_note}</div>' if safe_note and "⚠️" in safe_note else ""
+    note_html = f'<div style="font-size:.72rem;color:#F59E0B;margin-top:4px">{safe_note}</div>' if safe_note and "⚠️" in safe_note else ""
 
-    u = str(image_url or "").strip()
-    img_html = ""
-    if u.lower().startswith("http"):
-        eu = _html_escape(u, quote=True)
-        img_html = (
-            f'<div class="miss-thumb"><img src="{eu}" alt="" '
-            'style="width:76px;height:76px;border-radius:10px;object-fit:cover;'
-            'border:1px solid #444466;background:#0e1628" loading="lazy" '
-            'referrerpolicy="no-referrer" onerror="this.style.display=\'none\'" /></div>'
-        )
+    img_html = _img_tag(image_url, 76, 76, "#1F293788", 10)
+    if img_html:
+        img_html = f'<div class="miss-thumb">{img_html}</div>'
 
-    inner = f"""<div class="miss-card" style="border:1px solid {border_color};margin:8px 0;border-radius:10px;padding:12px;background:linear-gradient(135deg,#0a1628,#0e1a30)">
+    inner = f"""<div class="miss-card" style="border:1px solid {border_color}">
 <div style="display:flex;gap:14px;align-items:flex-start;direction:rtl;flex-wrap:wrap">
 {img_html}
 <div style="flex:1;min-width:0">
-<div class="miss-name" style="font-weight:700;color:#4fc3f7;font-size:1rem;line-height:1.35">{trust_html}{tester_badge}{safe_name}</div>
-<div class="miss-meta" style="font-size:.75rem;color:#888;margin-top:6px;line-height:1.5">🏷️ {safe_brand} &nbsp;|&nbsp; 📏 {safe_size} &nbsp;|&nbsp; 🧴 {safe_ptype} &nbsp;|&nbsp; 🏪 {safe_comp}</div>
+<div class="miss-name">{trust_html}{tester_badge}{safe_name}</div>
+<div class="miss-meta" style="margin-top:6px;line-height:1.5">🏷️ {safe_brand} &nbsp;|&nbsp; 📏 {safe_size} &nbsp;|&nbsp; 🧴 {safe_ptype} &nbsp;|&nbsp; 🏪 {safe_comp}</div>
 {variant_html}
 {note_html}
 </div>
 <div class="miss-prices" style="text-align:left;min-width:108px;flex-shrink:0">
-<div class="miss-comp-price" style="font-size:1.15rem;font-weight:900;color:#ff9800">{price:,.0f} ر.س</div>
-<div class="miss-suggested" style="font-size:.72rem;color:#4caf50;margin-top:4px">مقترح: {suggested_price:,.0f} ر.س</div>
+<div class="miss-comp-price">{price:,.0f} ر.س</div>
+<div class="miss-suggested" style="margin-top:4px">مقترح: {suggested_price:,.0f} ر.س</div>
 </div>
 </div>
 </div>"""
@@ -364,25 +462,8 @@ def miss_card(name, price, brand, size, ptype, comp, suggested_price,
 
 
 def lazy_img_tag(url, w=56, h=56, alt="", loading="lazy"):
-    """HTML img tag with lazy loading and error handling."""
-    u = str(url or "").strip()
-    if not u or u.lower() in ("nan", "none", ""):
-        return ""
-    eu = _html_escape(u, quote=True)
-    safe_alt = _html_escape(str(alt or ""), quote=True)
-    return (
-        f'<img src="{eu}" width="{w}" height="{h}" alt="{safe_alt}" '
-        f'loading="{loading}" referrerpolicy="no-referrer" '
-        f'style="border-radius:6px;object-fit:cover;border:1px solid #333344;background:#0e1628" '
-        f'onerror="this.style.display=\'none\'" />'
-    )
+    return _img_tag(url, w, h, "#333", 6)
 
 
 def linked_product_title(name, url="", max_len=60):
-    """Product title optionally wrapped in a link."""
-    safe = _html_escape(str(name or "")[:max_len])
-    u = str(url or "").strip()
-    if u and u.lower() not in ("nan", "none"):
-        eu = _html_escape(u, quote=True)
-        return f'<a href="{eu}" target="_blank" style="color:#4fc3f7;text-decoration:none" title="{_html_escape(str(name or ""), quote=True)}">{safe}</a>'
-    return f'<span style="color:#e0e0e0">{safe}</span>'
+    return _linked_name(name, url, "#38BDF8", max_len)
