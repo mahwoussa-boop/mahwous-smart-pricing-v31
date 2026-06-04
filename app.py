@@ -3342,7 +3342,7 @@ if page == "📊 لوحة التحكم":
                         job_id,
                         our_df,
                         comp_dfs,
-                        our_file.name,
+                        our_file.name if our_file else "كتالوج_محفوظ",
                         comp_names,
                         merge_previous=_dash_acc,
                         prev_analysis_records=_prev_ar,
@@ -3445,7 +3445,7 @@ if page == "📊 لوحة التحكم":
                     st.session_state.results = _r
                     st.session_state.analysis_df = df_all
                     log_analysis(
-                        our_file.name,
+                        our_file.name if our_file else "كتالوج_محفوظ",
                         comp_names,
                         len(our_df),
                         int((df_all.get("نسبة_التطابق", pd.Series(dtype=float)) > 0).sum()),
