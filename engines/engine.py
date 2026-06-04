@@ -2009,9 +2009,10 @@ def _row(product, our_price, our_id, brand, size, ptype, gender,
             pass  # معالَج بالأعلى
         elif src in ("gemini", "auto") or score >= REVIEW_MAX:
             if our_price > 0 and cp_display > 0:
-                if diff_display > PRICE_DIFF_THRESHOLD:   dec = "🔴 سعر أعلى"
-                elif diff_display < -PRICE_DIFF_THRESHOLD: dec = "🟢 سعر أقل"
-                else:                                      dec = "✅ موافق"
+                _pt2 = _smart_price_threshold(our_price, cp_display)
+                if diff_display > _pt2:   dec = "🔴 سعر أعلى"
+                elif diff_display < -_pt2: dec = "🟢 سعر أقل"
+                else:                      dec = "✅ موافق"
 
     # ترتيب comp_strip من الأرخص للأغلى (مرئياً)
     ac_sorted = sorted(ac, key=lambda c: float(c.get("price", 0) or 0))
