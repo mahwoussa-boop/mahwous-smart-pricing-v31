@@ -122,7 +122,7 @@ from utils.data_helpers import (safe_results_for_json, restore_results_from_json
                                 row_media_urls_from_analysis,
                                 our_product_url_from_row,
                                 competitor_product_url_from_row)
-from utils.db_manager import (init_db, log_event, log_decision,
+from utils.db_manager import (init_db, get_db, log_event, log_decision,
                                log_analysis, get_events, get_decisions,
                                get_analysis_history, upsert_price_history,
                                get_price_history, get_price_changes,
@@ -1378,7 +1378,7 @@ def _cb_send_make(
         st.session_state["_action_toast"] = (
             "success", f"✅ تم إرسال «{our_name}» ← {_tp:,.0f} ر.س"
         )
-        st.rerun()  # FIX: Smart Workflow & AI Tracking
+        # لا نستدعي st.rerun() هنا — الـ callback يُعيد الرسم تلقائياً
     else:
         _err_detail = _mk_res.get("message", "خطأ غير معروف")
         st.session_state[f"_act_{prefix}_{idx}"] = (
@@ -4098,10 +4098,11 @@ elif page == "🔍 منتجات مفقودة":
             if "selected_missing_indices" not in st.session_state:
                 st.session_state.selected_missing_indices = []
             # تنظيف المؤشرات القديمة التي لم تعد موجودة في filtered
-            _valid_indices = set(filtered.index)
-            st.session_state.selected_missing_indices = [
-                i for i in st.session_state.selected_missing_indices if i in _valid_indices
-            ]
+            if 'filtered' in dir() and hasattr(filtered, 'index'):
+                _valid_indices = set(filtered.index)
+                st.session_state.selected_missing_indices = [
+                    i for i in st.session_state.selected_missing_indices if i in _valid_indices
+                ]
             if "ready_missing_df" not in st.session_state:
                 st.session_state.ready_missing_df = None
             if "missing_dup_uncertain" not in st.session_state:
