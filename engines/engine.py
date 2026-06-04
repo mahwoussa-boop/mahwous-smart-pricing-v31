@@ -2457,6 +2457,44 @@ def run_full_analysis(our_df, comp_dfs, progress_callback=None, use_ai=True,
 
 
 # ═══════════════════════════════════════════════════════
+#  تصنيف المنتج: عطور / عناية / تجميل / أخرى
+# ═══════════════════════════════════════════════════════
+def classify_product_category(name: str) -> str:
+    """تصنيف المنتج حسب اسمه إلى: عطور / عناية / تجميل / أخرى"""
+    if not name:
+        return "📦 أخرى"
+    n = name.lower()
+    # عطور
+    if any(kw in n for kw in (
+        'عطر', 'بارفيوم', 'بيرفيوم', 'كولون', 'او دو', 'edp', 'edt',
+        'perfume', 'cologne', 'fragrance', 'parfum', 'مسك', 'بخور', 'عود',
+        'دهن', 'spray', 'بودي ميست', 'body mist', 'تستر', 'tester',
+        'eau de', 'او دي', 'اكستريت', 'extrait', 'انتنس', 'intense',
+    )):
+        return "🌸 عطور"
+    # تجميل
+    if any(kw in n for kw in (
+        'أحمر شفاه', 'احمر شفاه', 'كريم أساس', 'كريم اساس', 'ماسكارا',
+        'آيلاينر', 'ايلاينر', 'بودرة', 'مكياج', 'كونسيلر', 'هايلايتر',
+        'بلاشر', 'ظلال', 'روج', 'ملمع شفاه', 'برايمر',
+        'foundation', 'lipstick', 'mascara', 'concealer', 'makeup',
+        'eyeliner', 'blush', 'highlighter', 'primer', 'lip gloss',
+    )):
+        return "💄 تجميل"
+    # عناية
+    if any(kw in n for kw in (
+        'شامبو', 'بلسم', 'مرطب', 'واقي شمس', 'غسول', 'سيروم',
+        'لوشن', 'تونر', 'قناع', 'ماسك', 'كريم مرطب', 'مقشر',
+        'serum', 'moisturizer', 'shampoo', 'sunscreen', 'lotion',
+        'cleanser', 'scrub', 'بشرة', 'للشعر', 'للجسم', 'صابون',
+        'زيت شعر', 'زيت جسم', 'ديودرانت', 'deodorant', 'shower gel',
+        'body lotion', 'hand cream', 'كريم يد',
+    )):
+        return "🧴 عناية"
+    return "📦 أخرى"
+
+
+# ═══════════════════════════════════════════════════════
 #  المنتجات المفقودة — كشف التكرار الفائق الدقة v22
 # ═══════════════════════════════════════════════════════
 def find_missing_products(our_df, comp_dfs):
@@ -2752,6 +2790,7 @@ def find_missing_products(our_df, comp_dfs):
                 "مستوى_الثقة":  _conf_level,
                 "صورة_المنافس":  _img_url,
                 "رابط_المنافس":  _rlink,
+                "تصنيف_المنتج": classify_product_category(cp),
             }
 
             # إضافة معلومات النوع المتاح (تستر/أساسي)

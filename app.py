@@ -1339,19 +1339,25 @@ def _cb_send_make(
         )
         return
 
-    # FIX: Transparency & Reversibility
-    _mk_res = send_single_product({
-        "NO":         no or pid,
-        "product_id": pid,
-        "name": our_name,
-        "price": float(_tp),
-        "comp_name": comp_name,
-        "comp_price": comp_price,
-        "diff": diff,
-        "decision": decision,
-        "competitor": comp_src,
-        "comp_url": comp_url or "",
-    })
+    # FIX: Transparency & Reversibility + حماية من خطأ الشبكة
+    try:
+        _mk_res = send_single_product({
+            "NO":         no or pid,
+            "product_id": pid,
+            "name": our_name,
+            "price": float(_tp),
+            "comp_name": comp_name,
+            "comp_price": comp_price,
+            "diff": diff,
+            "decision": decision,
+            "competitor": comp_src,
+            "comp_url": comp_url or "",
+        })
+    except Exception as _net_err:
+        st.session_state[f"_act_{prefix}_{idx}"] = (
+            "error", f"❌ خطأ شبكة: {_net_err}"
+        )
+        return
     _mk_status = int(_mk_res.get("status_code") or 0)
     _ok = bool(_mk_res.get("success"))
 
@@ -3920,8 +3926,8 @@ elif page == "🔍 منتجات مفقودة":
                             st.rerun()
                 conf_f = st.session_state.get("miss_conf_active", "الكل")
 
-            # صف 2: ماركة + منافس + نوع
-            _f3, _f4, _f5 = st.columns(3)
+            # صف 2: ماركة + منافس + نوع + تصنيف
+            _f3, _f4, _f5, _f6 = st.columns(4)
             with _f3:
                 brand_f = st.selectbox("🏷️ الماركة", opts["brands"], key="miss_b")
             with _f4:
@@ -3929,6 +3935,9 @@ elif page == "🔍 منتجات مفقودة":
             with _f5:
                 variant_f = st.selectbox("📦 النوع",
                     ["الكل", "مفقود فعلاً", "يوجد تستر", "يوجد الأساسي"], key="miss_v")
+            with _f6:
+                _cat_opts = ["الكل", "🌸 عطور", "🧴 عناية", "💄 تجميل", "📦 أخرى"]
+                cat_f = st.selectbox("📋 التصنيف", _cat_opts, key="miss_cat")
 
             # صف 3: نطاق السعر (slider)
             _price_col = None
@@ -3981,6 +3990,9 @@ elif page == "🔍 منتجات مفقودة":
                 _cv = _conf_map.get(conf_f, "")
                 if _cv:
                     filtered = filtered[filtered["مستوى_الثقة"] == _cv]
+            # فلتر التصنيف
+            if cat_f != "الكل" and "تصنيف_المنتج" in filtered.columns:
+                filtered = filtered[filtered["تصنيف_المنتج"] == cat_f]
             # فلتر السعر
             if _p_range and _price_col and _price_col in filtered.columns:
                 _f_prices = pd.to_numeric(filtered[_price_col], errors="coerce").fillna(0)
@@ -3993,12 +4005,39 @@ elif page == "🔍 منتجات مفقودة":
                     _conf_sort=filtered["مستوى_الثقة"].map(_conf_order).fillna(3)
                 ).sort_values("_conf_sort").drop(columns=["_conf_sort"])
 
-            # ── عداد النتائج ──
+            # ── عداد النتائج + إحصائيات التصنيف ──
             _fc1, _fc2, _fc3 = st.columns([2, 2, 6])
             _fc1.metric("📋 نتائج الفلتر", f"{len(filtered):,}")
             if _price_col and _price_col in filtered.columns:
                 _est_rev = pd.to_numeric(filtered[_price_col], errors="coerce").sum()
                 _fc2.metric("💰 قيمة تقديرية", f"{_est_rev:,.0f} ر.س")
+            # إحصائيات التصنيف
+            if "تصنيف_المنتج" in df.columns:
+                _cat_counts = df["تصنيف_المنتج"].value_counts()
+                _cat_parts = " • ".join(f"{k}: {v}" for k, v in _cat_counts.items())
+                with _fc3:
+                    st.caption(f"📊 التوزيع: {_cat_parts}")
+
+            # ── أزرار تحديد جماعي ──
+            _sel_c1, _sel_c2, _sel_c3, _sel_c4 = st.columns([2, 2, 2, 4])
+            with _sel_c1:
+                if st.button("✅ تحديد الكل", key="miss_select_all", use_container_width=True):
+                    st.session_state["selected_missing_indices"] = list(filtered.index)
+                    st.rerun()
+            with _sel_c2:
+                if st.button("🟢 تحديد المؤكدة", key="miss_select_green", use_container_width=True):
+                    if "مستوى_الثقة" in filtered.columns:
+                        _green = filtered[filtered["مستوى_الثقة"] == "green"]
+                        st.session_state["selected_missing_indices"] = list(_green.index)
+                    st.rerun()
+            with _sel_c3:
+                if st.button("❌ إلغاء الكل", key="miss_deselect_all", use_container_width=True):
+                    st.session_state["selected_missing_indices"] = []
+                    st.rerun()
+            _sel_count = len(st.session_state.get("selected_missing_indices", []))
+            with _sel_c4:
+                if _sel_count > 0:
+                    st.info(f"📌 محدد: {_sel_count} منتج")
 
             _export_ok, _export_issues = validate_export_product_dataframe(filtered)
             if not _export_ok:
@@ -6078,10 +6117,16 @@ elif page == "🕷️ كشط المنافسين":
                 _pt = _sm_prog.get("products_total", 0) or 1
                 st.progress(min(_pd / _pt, 1.0), text=f"منتجات هذا المتجر: {_pd}/{_pt} (نجح: {_sm_prog.get('successful', 0)})")
                 st.caption(f"البدء: {_sm_prog.get('started_at', '')} • وضع: {'تزايدي' if _sm_prog.get('incremental') else 'كامل'}")
-                # auto-refresh
-                import time as _t_sc2
-                _t_sc2.sleep(2)
-                st.rerun()
+                # auto-refresh — حماية من حلقة لا نهائية
+                _sm_refresh_count = st.session_state.get("_sm_refresh_count", 0) + 1
+                st.session_state["_sm_refresh_count"] = _sm_refresh_count
+                if _sm_refresh_count < 300:  # حد أقصى 10 دقائق (300 × 2ث)
+                    import time as _t_sc2
+                    _t_sc2.sleep(2)
+                    st.rerun()
+                else:
+                    st.warning("⚠️ توقف التحديث التلقائي بعد 10 دقائق. اضغط F5 للتحديث.")
+                    st.session_state["_sm_refresh_count"] = 0
             elif _phase == "completed":
                 st.success(
                     f"✅ اكتمل بنجاح — {_sm_prog.get('products_done', 0):,} منتج عبر "
@@ -6418,12 +6463,13 @@ elif page == "🕷️ كشط المنافسين":
         _cur_pid = _read_pid_file()
         if _cur_pid and _is_process_alive(_cur_pid):
             try:
-                _os_scraper.kill(_cur_pid, 15)  # SIGTERM
+                import signal as _sig_mod
+                _os_scraper.kill(_cur_pid, _sig_mod.SIGTERM)
                 st.session_state["_sc_msg"] = (
                     "warning",
                     f"⏹️ تم إرسال إشارة إيقاف للكاشط (PID: {_cur_pid})"
                 )
-            except ProcessLookupError:
+            except (ProcessLookupError, ValueError, OSError, PermissionError):
                 st.session_state["_sc_msg"] = ("info", "العملية انتهت بالفعل")
             except Exception as e:
                 st.session_state["_sc_msg"] = ("error", f"❌ فشل الإيقاف: {e}")
