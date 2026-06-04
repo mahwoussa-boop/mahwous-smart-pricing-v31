@@ -1140,6 +1140,22 @@ def _price(row):
             pass
     return 0.0
 
+def _pid(row, id_col):
+    """استخراج معرف المنتج من الصف — آمن للقيم الفارغة."""
+    if not id_col or id_col not in row.index:
+        return ""
+    v = row.get(id_col, "")
+    if v is None or (isinstance(v, float) and pd.isna(v)):
+        return ""
+    s = str(v).strip()
+    if s.lower() in ("nan", "none", "<na>", ""):
+        return ""
+    try:
+        fv = float(s.replace(",", ""))
+        return str(int(fv)) if fv == int(fv) else s
+    except (ValueError, TypeError):
+        return s
+
 def _fcol(df, cands):
     """بحث مرن عن العمود — يعيد None إذا لم يجد تطابقاً."""
     cols = list(df.columns)
