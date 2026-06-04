@@ -1690,9 +1690,9 @@ def fill_extracted_features(batch_size: int = 5000) -> int:
     يعود بعدد الصفوف المحدّثة."""
     init_competitor_store()
     conn = get_db()
-    # فحص: هل هناك صفوف تحتاج ملء؟
+    # فحص: هل هناك صفوف تحتاج ملء؟ (agg_name فارغ = لم تُعالج بعد)
     need = conn.execute(
-        "SELECT COUNT(*) FROM competitor_products_store WHERE extracted_brand = '' OR extracted_brand IS NULL"
+        "SELECT COUNT(*) FROM competitor_products_store WHERE agg_name = '' OR agg_name IS NULL"
     ).fetchone()[0]
     if need == 0:
         conn.close()
@@ -1705,13 +1705,12 @@ def fill_extracted_features(batch_size: int = 5000) -> int:
     )
 
     updated = 0
-    offset = 0
     while True:
         rows = conn.execute(
             """SELECT id, product_name FROM competitor_products_store
-               WHERE extracted_brand = '' OR extracted_brand IS NULL
-               LIMIT ? OFFSET ?""",
-            (batch_size, offset)
+               WHERE agg_name = '' OR agg_name IS NULL
+               LIMIT ?""",
+            (batch_size,)
         ).fetchall()
         if not rows:
             break
@@ -1723,7 +1722,7 @@ def fill_extracted_features(batch_size: int = 5000) -> int:
             tp = extract_type(pname) or ""
             gd = extract_gender(pname) or ""
             cl = classify_product(pname) or ""
-            agg = normalize_name(pname) or ""
+            agg = normalize_name(pname) or pname  # fallback to name to avoid empty
             pl = extract_product_line(pname, br) or ""
             updates.append((br, sz, tp, gd, cl, agg, pl, row_id))
         conn.executemany(
@@ -1735,7 +1734,6 @@ def fill_extracted_features(batch_size: int = 5000) -> int:
         )
         conn.commit()
         updated += len(updates)
-        offset += batch_size
     conn.close()
     return updated
 

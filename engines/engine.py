@@ -1510,7 +1510,11 @@ class CompIndex:
         self.norm_names = [normalize(n) for n in self.raw_names]
 
         # ⚡ v31.8: استخدم الأعمدة المسبقة إذا توفرت (من DB) — أسرع 30x
-        _has_pre = "extracted_brand" in self.df.columns and self.df["extracted_brand"].notna().any()
+        _has_pre = (
+            "agg_name" in self.df.columns
+            and self.df["agg_name"].notna().any()
+            and (self.df["agg_name"].fillna("").astype(str) != "").sum() > len(self.df) * 0.5
+        )
 
         if _has_pre:
             # DB pre-computed — تحميل فوري
