@@ -161,6 +161,165 @@ def _progress_bar(slot, value: float, text: str) -> None:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+#  توليد ملف "استيراد منتجات جديدة" بتنسيق سلة الأصلي (40 عمود)
+# ══════════════════════════════════════════════════════════════════════════════
+def _generate_salla_import_xlsx(bundle: Dict[str, Any]) -> bytes:
+    """يُولد ملف XLSX بنفس تنسيق قالب سلة الأصلي (meta-header + 40 عمود)."""
+    import io
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "بيانات المنتج"
+
+    # صف 1: meta-header
+    _cols_40 = [
+        "النوع ", "أسم المنتج", "تصنيف المنتج", "صورة المنتج",
+        "وصف صورة المنتج", "نوع المنتج", "سعر المنتج", "الوصف",
+        "هل يتطلب شحن؟", "رمز المنتج sku", "سعر التكلفة", "السعر المخفض",
+        "تاريخ بداية التخفيض", "تاريخ نهاية التخفيض", "اقصي كمية لكل عميل",
+        "إخفاء خيار تحديد الكمية", "اضافة صورة عند الطلب", "الوزن",
+        "وحدة الوزن", "الماركة", "العنوان الترويجي", "تثبيت المنتج",
+        "الباركود", "السعرات الحرارية", "MPN", "GTIN",
+        "خاضع للضريبة ؟", "سبب عدم الخضوع للضريبة",
+        "[1] الاسم", "[1] النوع", "[1] القيمة", "[1] الصورة / اللون",
+        "[2] الاسم", "[2] النوع", "[2] القيمة", "[2] الصورة / اللون",
+        "[3] الاسم", "[3] النوع", "[3] القيمة", "[3] الصورة / اللون",
+    ]
+    ws.append(["بيانات المنتج"] + [""] * 39)  # meta-header
+    ws.append(_cols_40)  # أسماء الأعمدة
+
+    # صف البيانات
+    imgs = bundle.get("images") or []
+    img_str = ",".join(str(u).strip() for u in imgs if str(u).strip())
+    _name = bundle.get("product_name", "")
+    _price = float(bundle.get("price") or 0)
+    _sku = bundle.get("sku", "")
+    if not _sku:
+        _auto_brand = (bundle.get("brand") or "UNK")[:3].upper()
+        _auto_hash = abs(hash(_name)) % 9999
+        _sku = f"MH-{_auto_brand}-{_auto_hash:04d}"
+
+    _row = [
+        "منتج",                              # النوع
+        _name,                               # أسم المنتج
+        bundle.get("category", ""),          # تصنيف المنتج
+        img_str,                             # صورة المنتج
+        bundle.get("seo_title", _name[:80]), # وصف صورة المنتج
+        "منتج جاهز",                         # نوع المنتج
+        _price,                              # سعر المنتج
+        bundle.get("description_html", ""),  # الوصف
+        "نعم",                               # هل يتطلب شحن
+        _sku,                                # رمز المنتج sku
+        "",                                  # سعر التكلفة
+        "",                                  # السعر المخفض
+        "",                                  # تاريخ بداية التخفيض
+        "",                                  # تاريخ نهاية التخفيض
+        "",                                  # اقصي كمية لكل عميل
+        "لا",                                # إخفاء خيار تحديد الكمية
+        "",                                  # اضافة صورة عند الطلب
+        1,                                   # الوزن
+        "كجم",                               # وحدة الوزن
+        bundle.get("brand", ""),             # الماركة
+        bundle.get("seo_title", ""),         # العنوان الترويجي
+        "لا",                                # تثبيت المنتج
+        bundle.get("barcode", ""),           # الباركود
+        "",                                  # السعرات الحرارية
+        "",                                  # MPN
+        bundle.get("barcode", ""),           # GTIN
+        "نعم",                               # خاضع للضريبة
+        "",                                  # سبب عدم الخضوع
+        "", "", "", "",                      # [1]
+        "", "", "", "",                      # [2]
+        "", "", "", "",                      # [3]
+    ]
+    ws.append(_row)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  كشف ماركة مفقودة في ملف الماركات
+# ══════════════════════════════════════════════════════════════════════════════
+def _check_brand_exists(brand_name: str) -> bool:
+    """يتحقق إذا الماركة موجودة في brands.csv أو ماركات مهووس.csv."""
+    import os
+    _data_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
+    for fname in ("brands.csv", "ماركات مهووس.csv", "ماركات_مهووس.csv"):
+        _path = os.path.join(_data_dir, fname)
+        if not os.path.exists(_path):
+            continue
+        try:
+            for enc in ("utf-8-sig", "utf-8", "cp1256"):
+                try:
+                    _df = pd.read_csv(_path, encoding=enc)
+                    # البحث في كل الأعمدة النصية
+                    for col in _df.columns:
+                        if _df[col].dtype == object:
+                            _vals = _df[col].astype(str).str.lower().tolist()
+                            if brand_name.lower() in _vals:
+                                return True
+                            # بحث جزئي (مثل "جيفنشي | Givenchy")
+                            if any(brand_name.lower() in v for v in _vals):
+                                return True
+                    break
+                except Exception:
+                    continue
+        except Exception:
+            continue
+    return False
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  توليد ملف "الماركات التجارية" بتنسيق سلة (7 أعمدة)
+# ══════════════════════════════════════════════════════════════════════════════
+def _generate_brand_import_xlsx(bundle: Dict[str, Any]) -> bytes:
+    """يُولد ملف XLSX بتنسيق ملف الماركات التجارية لسلة (7 أعمدة)."""
+    import io
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "الماركات التجارية"
+
+    # الأعمدة
+    _headers = [
+        "اسم الماركة",
+        "وصف مختصر عن الماركة",
+        "صورة شعار الماركة",
+        "(إختياري) صورة البانر",
+        "(Page Title) عنوان صفحة العلامة التجارية",
+        "(SEO Page URL) رابط صفحة العلامة التجارية",
+        "(Page Description) وصف صفحة العلامة التجارية",
+    ]
+    ws.append(_headers)
+
+    _brand = (bundle.get("brand") or "").strip()
+    # محاولة جلب شعار الماركة من صور المنتج أو تركه فارغاً
+    _logo_url = ""
+    _imgs = bundle.get("images") or []
+    # لا نستخدم صورة المنتج كشعار — نتركها فارغة ليُضيفها المستخدم
+    _slug = _brand.replace(" ", "-").replace("|", "").strip("-")
+
+    _row = [
+        _brand,                                          # اسم الماركة
+        f"{_brand} — ماركة عالمية فاخرة متوفرة في مهووس للعطور.",  # وصف مختصر
+        _logo_url,                                       # صورة شعار الماركة
+        "",                                              # صورة البانر
+        f"{_brand} | عطور ومنتجات أصلية - مهووس للعطور",  # Page Title
+        f"{_slug}-مهووس",                                 # SEO Page URL
+        f"اكتشف منتجات {_brand} الأصلية في مهووس للعطور. تسوق أفخم العطور والمنتجات بضمان الأصالة.",  # Page Description
+    ]
+    ws.append(_row)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 #  واجهة مدمجة من app.py
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -409,31 +568,44 @@ def show() -> None:
             use_container_width=True,
         )
 
-    # v33: بوابة جودة
-    _quality_items = []
-    if bundle.get("product_name"): _quality_items.append("✅ اسم المنتج")
-    else: _quality_items.append("❌ اسم المنتج")
-    if bundle.get("brand"): _quality_items.append("✅ الماركة")
-    else: _quality_items.append("⚠️ الماركة (فارغة)")
-    if float(bundle.get("price", 0) or 0) > 0: _quality_items.append("✅ السعر")
-    else: _quality_items.append("❌ السعر")
-    if bundle.get("category"): _quality_items.append("✅ التصنيف")
-    else: _quality_items.append("⚠️ التصنيف (فارغ)")
-    if bundle.get("description_html") and len(bundle.get("description_html", "")) > 50: _quality_items.append("✅ الوصف")
-    else: _quality_items.append("⚠️ الوصف (قصير)")
-    if bundle.get("images"): _quality_items.append(f"✅ صور ({len(bundle.get('images', []))})")
-    else: _quality_items.append("❌ صور (لا توجد)")
-    _pass = sum(1 for q in _quality_items if q.startswith("✅"))
-    _total_q = len(_quality_items)
-    _pct_q = int((_pass / _total_q) * 100)
-    _q_color = "#10B981" if _pct_q >= 80 else "#F59E0B" if _pct_q >= 50 else "#EF4444"
-    st.markdown(f'<div style="padding:8px;border-radius:8px;border:1px solid {_q_color}33;margin:8px 0">'
-                f'<strong style="color:{_q_color}">🏷️ جودة المنتج: {_pct_q}%</strong> — '
-                + " | ".join(_quality_items) + "</div>", unsafe_allow_html=True)
+    # ══ ملف "استيراد منتجات جديدة" بتنسيق سلة الأصلي (40 عمود) ══
+    st.divider()
+    st.subheader("📋 ملف استيراد منتجات جديدة (تنسيق سلة الأصلي)")
+    try:
+        _salla_import_bytes = _generate_salla_import_xlsx(bundle)
+        st.download_button(
+            label="📥 تحميل ملف استيراد منتجات جديدة.xlsx",
+            data=_salla_import_bytes,
+            file_name="استيراد_منتجات_جديدة.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            type="primary",
+            use_container_width=True,
+        )
+        st.caption("✅ هذا الملف بنفس تنسيق سلة تماماً — جاهز للاستيراد المباشر")
+    except Exception as _imp_err:
+        st.error(f"❌ خطأ في توليد ملف الاستيراد: {_imp_err}")
 
-    st.caption(
-        "تأكد من أن **الماركة** و**التصنيف** يطابقان أسماء الملفات الرسمية لسلة لديك لتفادي رفض الاستيراد."
-    )
+    # ══ كشف ماركة مفقودة + توليد ملف ماركات ══
+    _brand_name = (bundle.get("brand") or "").strip()
+    if _brand_name:
+        _brand_exists = _check_brand_exists(_brand_name)
+        if not _brand_exists:
+            st.divider()
+            st.subheader("🏷️ ماركة جديدة — ملف الماركات التجارية")
+            st.warning(f"⚠️ الماركة «{_brand_name}» غير موجودة في ماركات متجرك. يمكنك تحميل ملف استيراد الماركة.")
+            try:
+                _brand_xlsx = _generate_brand_import_xlsx(bundle)
+                st.download_button(
+                    label=f"📥 تحميل ملف ماركة «{_brand_name}»",
+                    data=_brand_xlsx,
+                    file_name=f"ماركة_{_brand_name.replace(' ', '_')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    type="primary",
+                    use_container_width=True,
+                )
+                st.caption("✅ ارفع هذا الملف في سلة → الماركات التجارية → استيراد، ثم ارفع ملف المنتجات")
+            except Exception as _br_err:
+                st.error(f"❌ خطأ في توليد ملف الماركة: {_br_err}")
 
 
 def _uniq_keep_order(urls: List[str]) -> List[str]:
