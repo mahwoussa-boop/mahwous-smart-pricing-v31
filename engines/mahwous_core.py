@@ -34,7 +34,15 @@ def _is_sample_strict(name: str) -> bool:
     if not isinstance(name, str) or not name.strip():
         return True
     nl = name.lower()
-    return any(k.lower() in nl for k in REJECT_KEYWORDS)
+    # v31.6: word boundary matching لمنع false positives مثل "Crystal Split"
+    for k in REJECT_KEYWORDS:
+        try:
+            if re.search(r'\b' + re.escape(k.lower()) + r'\b', nl):
+                return True
+        except re.error:
+            if k.lower() in nl:
+                return True
+    return False
 
 def _extract_ml(name: str) -> float:
     if not isinstance(name, str):
@@ -51,8 +59,16 @@ def _classify_rejected(name: str) -> bool:
     if not isinstance(name, str):
         return True
     nl = name.lower()
-    rejects = ["sample", "عينة", "عينه", "miniature", "مينياتشر", "travel size", "decant", "تقسيم", "split"]
-    return any(w in nl for w in rejects)
+    rejects = ["sample", "عينة", "عينه", "miniature", "مينياتشر", "travel size", "decant", "تقسيم"]
+    # v31.6: لا نرفض "split" ككلمة منفردة — فقط كلمات العينات المؤكدة
+    for w in rejects:
+        try:
+            if re.search(r'\b' + re.escape(w) + r'\b', nl):
+                return True
+        except re.error:
+            if w in nl:
+                return True
+    return False
 
 def apply_strict_pipeline_filters(
     df: pd.DataFrame,

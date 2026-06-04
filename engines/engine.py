@@ -922,8 +922,8 @@ def normalize_name(text):
         t = t.replace(src, dst)
     # 3. حذف كلمات الضجيج
     t = _NOISE_RE.sub(' ', t)
-    # 4. حذف الأرقام المتبقية + الرموز
-    t = re.sub(r'\b\d+\b', ' ', t)
+    # 4. v31.6: حذف الأرقام المتبوعة بوحدة قياس فقط (حماية أرقام المنتج مثل 212, 360)
+    t = re.sub(r'\b\d+\s*(?:ml|مل|g|جم|جرام|oz|اونس|l|لتر)\b', ' ', t, flags=re.IGNORECASE)
     t = re.sub(r'[^\w\s\u0600-\u06FF]', ' ', t)
     return re.sub(r'\s+', ' ', t).strip()
 
@@ -942,6 +942,7 @@ def extract_size(text):
     ml = re.findall(r'(\d+(?:\.\d+)?)\s*(?:ml|مل|ملي|milliliter)', tl)
     return float(ml[0]) if ml else 0.0
 
+@functools.lru_cache(maxsize=2000)
 def extract_brand(text):
     if not isinstance(text, str): return ""
     n = normalize(text)
@@ -1903,9 +1904,17 @@ def _row(product, our_price, our_id, brand, size, ptype, gender,
     #   score ≥ 85%           → مطابقة مؤكدة → توزيع سعري
     #   60% ≤ score < 85%     → تحت المراجعة (مطابقة محتملة)
     #   score < 60%           → صف «مستبعد» عبر _excluded_match_row (لا إخفاء صامت)
-    PRICE_DIFF_THRESHOLD = 10  # فرق السعر المقبول بالريال
-    NO_MATCH_THRESHOLD   = 60  # أقل من هذا → غير متطابق → يُخفى
-    REVIEW_MAX           = 85  # أقل من هذا → مراجعة
+    # v31.6: استخدام قيم config.py
+    NO_MATCH_THRESHOLD   = 60
+    REVIEW_MAX           = MATCH_THRESHOLD if MATCH_THRESHOLD else 85
+
+    # v31.6: حد سعري ديناميكي
+    def _smart_price_threshold(p1, p2):
+        avg = (p1 + p2) / 2
+        if avg >= 300:  return avg * 0.05
+        elif avg >= 100: return PRICE_TOLERANCE if PRICE_TOLERANCE else 10
+        else:            return 5
+
     if override:
         dec = override
     elif score < NO_MATCH_THRESHOLD:
@@ -1918,14 +1927,20 @@ def _row(product, our_price, our_id, brand, size, ptype, gender,
     elif src in ("gemini","auto") or score >= REVIEW_MAX:
         # مطابقة مؤكدة (≥85%) → توزيع حسب السعر
         if our_price > 0 and cp > 0:
-            if diff > PRICE_DIFF_THRESHOLD:     dec = "🔴 سعر أعلى"
-            elif diff < -PRICE_DIFF_THRESHOLD:   dec = "🟢 سعر أقل"
+            _pt = _smart_price_threshold(our_price, cp)
+            if diff > _pt:      dec = "🔴 سعر أعلى"
             else:                                dec = "✅ موافق"
         else:
-            dec = "⚠️ تحت المراجعة"  # لا يوجد سعر → مراجعة
+            dec = "🔍 منتجات مفقودة"  # v31.6: لا سعر → مفقود
     else:
         # 60% ≤ score < 85% → مطابقة محتملة → تحت المراجعة
-        dec = "⚠️ تحت المراجعة"
+        if our_price > 0 and cp > 0:
+            _pt = _smart_price_threshold(our_price, cp)
+            if diff > _pt:      dec = "🔴 سعر أعلى"
+            elif diff < -_pt:   dec = "🟢 سعر أقل"
+            else:                dec = "✅ موافق"
+        else:
+            dec = "🔍 منتجات مفقودة"
 
     ai_lbl = {"gemini":f"🤖✅({score:.0f}%)",
               "auto":f"🎯({score:.0f}%)",
@@ -2316,19 +2331,30 @@ def run_full_analysis(our_df, comp_dfs, progress_callback=None, use_ai=True,
         product = str(row.get(our_col, "")).strip()
         if not product:
             audit_stats["skipped_empty"] += 1
+            # v31.6: لا نفقد المنتج — نضيفه في النتائج
+            results.append(_excluded_match_row(
+                "(اسم فارغ)", 0.0, _pid(row, our_id_col), "", 0, "", "",
+                our_img=_cell_clean(row, our_img_col),
+                our_url=_cell_clean(row, our_url_col),
+                score=0, مصدر_المطابقة="skipped_empty_name",
+            ))
             if progress_callback:
                 progress_callback((i + 1) / total, results)
             continue
 
-        if is_sample(product):
-            audit_stats["skipped_samples"] += 1
-            if progress_callback:
-                progress_callback((i + 1) / total, results)
-            continue
+        # v31.6: التستر والعينات لم تعد تُسقط — تُقارن مع نظيراتها
+        _product_class = classify_product(product)
 
         size_ml = extract_size(product)
-        if size_ml > 0 and size_ml < 10:
+        if size_ml > 0 and size_ml < 2:
+            # أقل من 2ml فقط — عينات صغيرة جداً
             audit_stats["skipped_samples"] += 1
+            results.append(_excluded_match_row(
+                product, 0.0, _pid(row, our_id_col), "", size_ml, "", "",
+                our_img=_cell_clean(row, our_img_col),
+                our_url=_cell_clean(row, our_url_col),
+                score=0, مصدر_المطابقة="skipped_micro_size",
+            ))
             if progress_callback:
                 progress_callback((i + 1) / total, results)
             continue
@@ -2410,6 +2436,15 @@ def run_full_analysis(our_df, comp_dfs, progress_callback=None, use_ai=True,
                     _led.mark_state(_cid, CONFIRMED_MATCH,
                                     reason_code="auto_match",
                                     last_score=float(best0.get("score") or 0))
+            else:
+                # v31.6: safety net
+                audit_stats["dropped_none"] = audit_stats.get("dropped_none", 0) + 1
+                results.append(_excluded_match_row(
+                    product, our_price, our_id, brand, size, ptype, gender,
+                    our_img=our_img, our_url=our_url,
+                    score=float(best0.get("score") or 0),
+                    مصدر_المطابقة="row_returned_none",
+                ))
         else:
             pending.append(dict(
                 product=product, our_price=our_price, our_id=our_id,
