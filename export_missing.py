@@ -61,32 +61,33 @@ def main():
     print("\n[1/6] Loading our catalog...")
     from utils.db_manager import get_db
     conn = get_db()
-    
-    # Our catalog
-    our_df = pd.read_sql("SELECT * FROM our_catalog", conn)
-    our_count = len(our_df)
-    print(f"  Our catalog: {our_count:,} products")
-    
-    # Our brands
-    our_name_col = None
-    for c in ("product_name", "اسم المنتج", "المنتج", "أسم المنتج", "name"):
-        if c in our_df.columns:
-            our_name_col = c
-            break
-    
-    our_names_norm = set()
-    if our_name_col:
-        our_names_norm = {_norm(n) for n in our_df[our_name_col].dropna().astype(str)}
-    print(f"  Our names index: {len(our_names_norm):,}")
-    
-    # ── 2. تحميل منتجات المنافسين ──
-    print("\n[2/6] Loading competitor products...")
-    comp_df = pd.read_sql(
-        "SELECT * FROM competitor_products_store WHERE price > 0", conn
-    )
-    print(f"  Competitor products with price: {len(comp_df):,}")
-    print(f"  Stores: {comp_df['competitor'].nunique()}")
-    conn.close()
+    try:
+        # Our catalog
+        our_df = pd.read_sql("SELECT * FROM our_catalog", conn)
+        our_count = len(our_df)
+        print(f"  Our catalog: {our_count:,} products")
+        
+        # Our brands
+        our_name_col = None
+        for c in ("product_name", "اسم المنتج", "المنتج", "أسم المنتج", "name"):
+            if c in our_df.columns:
+                our_name_col = c
+                break
+        
+        our_names_norm = set()
+        if our_name_col:
+            our_names_norm = {_norm(n) for n in our_df[our_name_col].dropna().astype(str)}
+        print(f"  Our names index: {len(our_names_norm):,}")
+        
+        # ── 2. تحميل منتجات المنافسين ──
+        print("\n[2/6] Loading competitor products...")
+        comp_df = pd.read_sql(
+            "SELECT * FROM competitor_products_store WHERE price > 0", conn
+        )
+        print(f"  Competitor products with price: {len(comp_df):,}")
+        print(f"  Stores: {comp_df['competitor'].nunique()}")
+    finally:
+        conn.close()
     
     # ── 3. كشف المنتجات المفقودة ──
     print("\n[3/6] Finding missing products (strict verification)...")
@@ -104,7 +105,13 @@ def main():
     duplicate_count = 0
     seen_norms = set()
     
-    for _, row in comp_df.iterrows():
+    # حد أقصى للمعالجة — لمنع التعليق مع ملفات ضخمة
+    _MAX_COMP_ROWS = 50000
+    _comp_to_process = comp_df.head(_MAX_COMP_ROWS)
+    if len(comp_df) > _MAX_COMP_ROWS:
+        print(f"  ⚠️ Processing first {_MAX_COMP_ROWS:,} of {len(comp_df):,} competitor products (limit)")
+    
+    for _ri, (_, row) in enumerate(_comp_to_process.iterrows()):
         name = _safe(row.get("product_name", ""))
         if not name:
             continue

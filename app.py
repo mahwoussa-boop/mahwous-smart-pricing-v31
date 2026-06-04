@@ -644,19 +644,21 @@ if st.session_state.results is None and not st.session_state.job_running:
     _auto_job = None
     try:
         conn = get_db()
-        # أولاً: ابحث عن وظيفة فيها نتائج + مفقودات
-        _done_row = conn.execute(
-            "SELECT job_id FROM job_progress WHERE status='done' "
-            "AND results_json != '[]' AND missing_json IS NOT NULL AND missing_json != '[]' "
-            "ORDER BY id DESC LIMIT 1"
-        ).fetchone()
-        # إذا لم نجد، ابحث عن أي وظيفة بنتائج
-        if not _done_row:
+        try:
+            # أولاً: ابحث عن وظيفة فيها نتائج + مفقودات
             _done_row = conn.execute(
-                "SELECT job_id FROM job_progress WHERE status='done' AND results_json != '[]' "
+                "SELECT job_id FROM job_progress WHERE status='done' "
+                "AND results_json != '[]' AND missing_json IS NOT NULL AND missing_json != '[]' "
                 "ORDER BY id DESC LIMIT 1"
             ).fetchone()
-        conn.close()
+            # إذا لم نجد، ابحث عن أي وظيفة بنتائج
+            if not _done_row:
+                _done_row = conn.execute(
+                    "SELECT job_id FROM job_progress WHERE status='done' AND results_json != '[]' "
+                    "ORDER BY id DESC LIMIT 1"
+                ).fetchone()
+        finally:
+            conn.close()
         if _done_row:
             _auto_job = get_job_progress(_done_row["job_id"])
     except Exception:
@@ -672,12 +674,14 @@ if st.session_state.results is None and not st.session_state.job_running:
             if _auto_miss.empty:
                 try:
                     _miss_conn = get_db()
-                    _miss_row = _miss_conn.execute(
-                        "SELECT missing_json FROM job_progress WHERE status='done' "
-                        "AND missing_json IS NOT NULL AND missing_json != '[]' "
-                        "ORDER BY id DESC LIMIT 1"
-                    ).fetchone()
-                    _miss_conn.close()
+                    try:
+                        _miss_row = _miss_conn.execute(
+                            "SELECT missing_json FROM job_progress WHERE status='done' "
+                            "AND missing_json IS NOT NULL AND missing_json != '[]' "
+                            "ORDER BY id DESC LIMIT 1"
+                        ).fetchone()
+                    finally:
+                        _miss_conn.close()
                     if _miss_row:
                         import json as _json_miss
                         _auto_miss = pd.DataFrame(_json_miss.loads(_miss_row["missing_json"]))
@@ -1053,8 +1057,6 @@ def _render_reconciliation_dashboard(audit_stats: dict):
                     file_name="failed_rows.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     key="dl_failed_rows_prominent",
-                
-                    on_click="ignore"
                 )
     if not _fb:
         from pathlib import Path
@@ -1075,8 +1077,6 @@ def _render_reconciliation_dashboard(audit_stats: dict):
             file_name="failed_rows.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             key="dl_failed_rows_log",
-        
-            on_click="ignore"
         )
     st.caption(
         "الأرقام تعكس **صفوف ملفات المنافس** في آخر تشغيل؛ إن فعّلت الدمج التراكمي قد يزيد عدد "
@@ -1551,7 +1551,6 @@ def render_pro_table(df, prefix, section_type="update", show_search=True,
             file_name=f"{prefix}_{datetime.now().strftime('%Y%m%d')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             key=f"{prefix}_xl",
-                on_click="ignore"
             )
     with ac2:
         _csdf = filtered.copy()
@@ -1562,7 +1561,6 @@ def render_pro_table(df, prefix, section_type="update", show_search=True,
         st.download_button("📄 CSV", data=_csv_bytes,
             file_name=f"{prefix}_{datetime.now().strftime('%Y%m%d')}.csv",
             mime="text/csv", key=f"{prefix}_csv",
-                on_click="ignore"
             )
     with ac3:
         _bulk_labels = {"raise": "🤖 تحليل ذكي — خفض (أول 20)",
@@ -2799,7 +2797,6 @@ if page == "📊 لوحة التحكم":
                 st.download_button("📥 تصدير كل الأقسام Excel",
                     data=excel_all, file_name="mahwous_all.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        on_click="ignore"
                     )
         with cc2:
             if st.button("📤 إرسال كل شيء لـ Make (دفعات ذكية)",
@@ -3473,17 +3470,26 @@ if page == "📊 لوحة التحكم":
                                 _prev_miss_df, missing_df
                             )
 
-                    for _, row in df_all.iterrows():
-                        if row.get("نسبة_التطابق", 0) > 0:
-                            upsert_price_history(
-                                str(row.get("المنتج", "")),
-                                str(row.get("المنافس", "")),
-                                safe_float(row.get("سعر_المنافس", 0)),
-                                safe_float(row.get("السعر", 0)),
-                                safe_float(row.get("الفرق", 0)),
-                                safe_float(row.get("نسبة_التطابق", 0)),
-                                str(row.get("القرار", "")),
-                            )
+                    # حفظ تاريخ الأسعار — مع حد أقصى وحماية من التعليق
+                    try:
+                        _ph_limit = min(len(df_all), 5000)  # حد أقصى لمنع التعليق
+                        _ph_count = 0
+                        for _, row in df_all.head(_ph_limit).iterrows():
+                            if safe_float(row.get("نسبة_التطابق", 0)) > 0:
+                                upsert_price_history(
+                                    str(row.get("المنتج", "")),
+                                    str(row.get("المنافس", "")),
+                                    safe_float(row.get("سعر_المنافس", 0)),
+                                    safe_float(row.get("السعر", 0)),
+                                    safe_float(row.get("الفرق", 0)),
+                                    safe_float(row.get("نسبة_التطابق", 0)),
+                                    str(row.get("القرار", "")),
+                                )
+                                _ph_count += 1
+                        if len(df_all) > _ph_limit:
+                            st.caption(f"⚠️ تم حفظ {_ph_count} من {len(df_all)} سجل في تاريخ الأسعار (حد أقصى {_ph_limit})")
+                    except Exception as _ph_err:
+                        st.caption(f"⚠️ تعذّر حفظ تاريخ الأسعار: {_ph_err}")
 
                     _r = _split_results(df_all)
                     _r["missing"] = missing_df
@@ -3647,31 +3653,40 @@ elif page == "🔍 منتجات مفقودة":
                     st.error("❌ ارفع جميع الملفات الأربعة.")
                 else:
                     def _save(f):
-                        t = _tmp.NamedTemporaryFile(delete=False, suffix=_Path(f.name).suffix)
-                        t.write(f.read()); t.close(); return t.name
+                        try:
+                            t = _tmp.NamedTemporaryFile(delete=False, suffix=_Path(f.name).suffix)
+                            t.write(f.read()); t.close(); return t.name
+                        except Exception as _sf_err:
+                            st.error(f"❌ فشل حفظ الملف {f.name}: {_sf_err}")
+                            return None
                     with st.spinner("⚙️ جارٍ الفحص الذكي..."):
-                        _res = build_missing_exports(
-                            catalog_path=_save(_smart_cat),
-                            competitor_paths=[_save(f) for f in _smart_cmp],
-                            brands_path=_save(_smart_br),
-                            categories_path=_save(_smart_cats),
-                            use_ai=_use_ai,
-                            generate_descriptions=_gen_desc,
-                        )
-                    st.success(f"✅ {_res['products_count']} منتج | {_res['new_brands_count']} ماركة جديدة")
-                    _d1, _d2 = st.columns(2)
-                    with _d1:
-                        with open(_res["products_file"], "rb") as fh:
-                            st.download_button("📥 تحميل المنتجات الجديدة", fh.read(),
-                                file_name=_Path(_res["products_file"]).name,
-                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                use_container_width=True, key="smart_dl_prod")
-                    with _d2:
-                        if _res["new_brands_file"]:
-                            with open(_res["new_brands_file"], "rb") as fh:
-                                st.download_button("📥 تحميل الماركات الجديدة", fh.read(),
-                                    file_name=_Path(_res["new_brands_file"]).name,
-                                    mime="text/csv", use_container_width=True, key="smart_dl_br")
+                        try:
+                            _res = build_missing_exports(
+                                catalog_path=_save(_smart_cat),
+                                competitor_paths=[_save(f) for f in _smart_cmp],
+                                brands_path=_save(_smart_br),
+                                categories_path=_save(_smart_cats),
+                                use_ai=_use_ai,
+                                generate_descriptions=_gen_desc,
+                            )
+                        except Exception as _build_err:
+                            st.error(f"❌ فشل الاستخراج الذكي: {_build_err}")
+                            _res = None
+                    if _res:
+                        st.success(f"✅ {_res['products_count']} منتج | {_res['new_brands_count']} ماركة جديدة")
+                        _d1, _d2 = st.columns(2)
+                        with _d1:
+                            with open(_res["products_file"], "rb") as fh:
+                                st.download_button("📥 تحميل المنتجات الجديدة", fh.read(),
+                                    file_name=_Path(_res["products_file"]).name,
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                    use_container_width=True, key="smart_dl_prod")
+                        with _d2:
+                            if _res["new_brands_file"]:
+                                with open(_res["new_brands_file"], "rb") as fh:
+                                    st.download_button("📥 تحميل الماركات الجديدة", fh.read(),
+                                        file_name=_Path(_res["new_brands_file"]).name,
+                                        mime="text/csv", use_container_width=True, key="smart_dl_br")
         except Exception as _smart_e:
             st.error(f"تعذّر تحميل المحرك الذكي: {_smart_e}")
 
@@ -3944,11 +3959,12 @@ elif page == "🔍 منتجات مفقودة":
             filtered = df.copy()
             if search:
                 _s_lower = search.lower()
-                filtered = filtered[filtered.apply(
-                    lambda r: _s_lower in str(r.get("منتج_المنافس", "")).lower()
-                    or _s_lower in str(r.get("الماركة", "")).lower()
-                    or _s_lower in str(r.get("المنافس", "")).lower(), axis=1
-                )]
+                # بحث vectorized سريع بدل lambda بطيء
+                _mask = pd.Series(False, index=filtered.index)
+                for _sc in ("منتج_المنافس", "الماركة", "المنافس"):
+                    if _sc in filtered.columns:
+                        _mask = _mask | filtered[_sc].astype(str).str.lower().str.contains(_s_lower, na=False, regex=False)
+                filtered = filtered[_mask]
             if brand_f != "الكل" and "الماركة" in filtered.columns:
                 filtered = filtered[filtered["الماركة"].str.contains(brand_f, case=False, na=False, regex=False)]
             if comp_f != "الكل" and "المنافس" in filtered.columns:
@@ -4081,6 +4097,11 @@ elif page == "🔍 منتجات مفقودة":
 
             if "selected_missing_indices" not in st.session_state:
                 st.session_state.selected_missing_indices = []
+            # تنظيف المؤشرات القديمة التي لم تعد موجودة في filtered
+            _valid_indices = set(filtered.index)
+            st.session_state.selected_missing_indices = [
+                i for i in st.session_state.selected_missing_indices if i in _valid_indices
+            ]
             if "ready_missing_df" not in st.session_state:
                 st.session_state.ready_missing_df = None
             if "missing_dup_uncertain" not in st.session_state:
@@ -4189,43 +4210,54 @@ elif page == "🔍 منتجات مفقودة":
 
                             # ── Phase B: AI Verification (uncertain only) ──────
                             if _ai_verify_queue and st.session_state.get("miss_dup_ai_verify", True):
-                                st.write(f"🤖 المرحلة 2: تحقق AI لـ {len(_ai_verify_queue)} حالة مشكوكة...")
-                                for _qi, (_q_idx, _q_row, _q_cands) in enumerate(_ai_verify_queue):
-                                    _q_name = str(_q_row.get("منتج_المنافس", "")).strip()
-                                    st.write(f"  🔍 [{_qi+1}/{len(_ai_verify_queue)}] {_q_name[:35]}...")
-
-                                    _ai_result = ai_verify_dedup(_q_name, _q_cands)
-                                    _ai_match = _ai_result.get("match", False)
-                                    _ai_conf = _ai_result.get("confidence", 0)
-                                    _ai_matched = _ai_result.get("matched_name", "")
-
-                                    if _ai_match and _ai_conf >= 75:
-                                        st.write(f"  ⛔ AI أكد التكرار: {_q_name[:28]} ≈ {_ai_matched[:28]} ({_ai_conf}%)")
-                                        confirmed_skipped += 1
-                                    elif (not _ai_match) and _ai_conf >= 65:
-                                        # AI confidently says NOT a match → truly missing
+                                _ai_max = min(len(_ai_verify_queue), 25)  # حد أقصى لمنع التعليق
+                                if len(_ai_verify_queue) > _ai_max:
+                                    st.write(f"⚠️ سيتم فحص {_ai_max} من {len(_ai_verify_queue)} حالة مشكوكة (حد أقصى)")
+                                    # البقية تعامل ك truly missing
+                                    for _q_idx, _q_row, _q_cands in _ai_verify_queue[_ai_max:]:
                                         _truly_missing_rows.append((_q_idx, _q_row))
-                                    else:
-                                        # Still uncertain after AI
-                                        _best_cand = _q_cands[0]["name"] if _q_cands else "—"
-                                        _best_score = _q_cands[0]["score"] if _q_cands else 0
-                                        _item = {
-                                            "المنتج_المنافس": _q_name,
-                                            "مرشح_لدينا": _best_cand,
-                                            "سبب": f"تشابه {_best_score:.0f}% — AI غير حاسم ({_ai_conf}%)",
-                                            "_idx": str(_q_idx),
-                                            "_row": _q_row.to_dict() if hasattr(_q_row, "to_dict") else dict(_q_row),
-                                        }
-                                        uncertain_pending.append(_item)
-                                        if uncertain_policy == "❌ استبعاد تلقائي":
-                                            st.write(f"  ⚠️ استبعاد مشكوك: {_q_name[:30]}")
-                                            uncertain_skipped += 1
-                                        elif uncertain_policy == "⏸️ إيقاف وطلب قرار":
-                                            pass  # will pause after loop
-                                        else:
-                                            # متابعة مع التحذير
+                                st.write(f"🤖 المرحلة 2: تحقق AI لـ {_ai_max} حالة مشكوكة...")
+                                for _qi, (_q_idx, _q_row, _q_cands) in enumerate(_ai_verify_queue[:_ai_max]):
+                                    _q_name = str(_q_row.get("منتج_المنافس", "")).strip()
+                                    st.write(f"  🔍 [{_qi+1}/{_ai_max}] {_q_name[:35]}...")
+
+                                    try:
+                                        _ai_result = ai_verify_dedup(_q_name, _q_cands)
+                                        _ai_match = _ai_result.get("match", False)
+                                        _ai_conf = _ai_result.get("confidence", 0)
+                                        _ai_matched = _ai_result.get("matched_name", "")
+
+                                        if _ai_match and _ai_conf >= 75:
+                                            st.write(f"  ⛔ AI أكد التكرار: {_q_name[:28]} ≈ {_ai_matched[:28]} ({_ai_conf}%)")
+                                            confirmed_skipped += 1
+                                        elif (not _ai_match) and _ai_conf >= 65:
+                                            # AI confidently says NOT a match → truly missing
                                             _truly_missing_rows.append((_q_idx, _q_row))
-                                            st.write(f"  ⚠️ متابعة رغم الشك: {_q_name[:30]}")
+                                        else:
+                                            # Still uncertain after AI
+                                            _best_cand = _q_cands[0]["name"] if _q_cands else "—"
+                                            _best_score = _q_cands[0]["score"] if _q_cands else 0
+                                            _item = {
+                                                "المنتج_المنافس": _q_name,
+                                                "مرشح_لدينا": _best_cand,
+                                                "سبب": f"تشابه {_best_score:.0f}% — AI غير حاسم ({_ai_conf}%)",
+                                                "_idx": str(_q_idx),
+                                                "_row": _q_row.to_dict() if hasattr(_q_row, "to_dict") else dict(_q_row),
+                                            }
+                                            uncertain_pending.append(_item)
+                                            if uncertain_policy == "❌ استبعاد تلقائي":
+                                                st.write(f"  ⚠️ استبعاد مشكوك: {_q_name[:30]}")
+                                                uncertain_skipped += 1
+                                            elif uncertain_policy == "⏸️ إيقاف وطلب قرار":
+                                                pass  # will pause after loop
+                                            else:
+                                                # متابعة مع التحذير
+                                                _truly_missing_rows.append((_q_idx, _q_row))
+                                                st.write(f"  ⚠️ متابعة رغم الشك: {_q_name[:30]}")
+                                    except Exception as _ai_err:
+                                        # فشل AI → اعتبره مفقوداً فعلاً
+                                        _truly_missing_rows.append((_q_idx, _q_row))
+                                        st.write(f"  ⚠️ تعذّر التحقق: {_q_name[:30]} — {str(_ai_err)[:50]}")
                             elif _ai_verify_queue:
                                 # AI verify disabled — apply policy directly
                                 for _q_idx, _q_row, _q_cands in _ai_verify_queue:
@@ -4253,40 +4285,52 @@ elif page == "🔍 منتجات مفقودة":
                                 status.update(label="⏸️ تم إيقاف المعالجة لوجود حالات مشكوك فيها", state="error", expanded=True)
                                 st.warning("تم الإيقاف: راجع جدول الحالات المشكوك فيها بالأسفل ثم غيّر السياسة أو عدّل الاختيار.")
                             else:
-                                if _truly_missing_rows:
-                                    st.write(f"📝 المرحلة 3: إثراء {len(_truly_missing_rows)} منتج (Fragrantica + AI)...")
-                                for _ei, (_e_idx, _e_row) in enumerate(_truly_missing_rows):
-                                    p_name = str(_e_row.get("منتج_المنافس", "")).strip()
-                                    p_price = safe_float(_e_row.get("سعر_المنافس", 0))
-                                    st.write(f"  📦 [{_ei+1}/{len(_truly_missing_rows)}] {p_name[:35]}...")
+                                _enrich_max = 50  # حد أقصى للإثراء لمنع التعليق
+                                _enrichable = _truly_missing_rows[:_enrich_max]
+                                if _enrichable:
+                                    st.write(f"📝 المرحلة 3: إثراء {len(_enrichable)} منتج (Fragrantica + AI)...")
+                                    if len(_truly_missing_rows) > _enrich_max:
+                                        st.write(f"⚠️ سيتم إثراء {_enrich_max} من {len(_truly_missing_rows)} منتج (حد أقصى)")
+                                        # البقية تضاف بدون إثراء
+                                        for _e_idx, _e_row in _truly_missing_rows[_enrich_max:]:
+                                            processed_rows.append(_e_row.copy())
+                                for _ei, (_e_idx, _e_row) in enumerate(_enrichable):
+                                    try:
+                                        p_name = str(_e_row.get("منتج_المنافس", "")).strip()
+                                        p_price = safe_float(_e_row.get("سعر_المنافس", 0))
+                                        st.write(f"  📦 [{_ei+1}/{len(_enrichable)}] {p_name[:35]}...")
 
-                                    frag_info = fetch_fragrantica_info(p_name)
-                                    raw_data = f"الاسم: {p_name}, السعر: {p_price}"
-                                    if frag_info.get("success"):
-                                        raw_data += f", المكونات: {', '.join(frag_info.get('top_notes', []))}"
+                                        frag_info = fetch_fragrantica_info(p_name)
+                                        raw_data = f"الاسم: {p_name}, السعر: {p_price}"
+                                        if frag_info.get("success"):
+                                            raw_data += f", المكونات: {', '.join(frag_info.get('top_notes', []))}"
 
-                                    html_body = generate_mahwous_description(
-                                        product_name=p_name,
-                                        price=p_price,
-                                        fragrantica_data=frag_info if frag_info.get("success") else None,
-                                    )
-                                    seo_data = generate_seo_description(raw_data)
+                                        html_body = generate_mahwous_description(
+                                            product_name=p_name,
+                                            price=p_price,
+                                            fragrantica_data=frag_info if frag_info.get("success") else None,
+                                        )
+                                        seo_data = generate_seo_description(raw_data)
 
-                                    new_row = _e_row.copy()
-                                    new_row["وصف_AI"] = html_body or seo_data.get("markdown_desc", "")
-                                    new_row["الماركة_الرسمية"] = seo_data.get(
-                                        "exact_brand",
-                                        str(_e_row.get("الماركة", "")),
-                                    )
-                                    new_row["التصنيف_الرسمي"] = seo_data.get(
-                                        "exact_category",
-                                        "العطور",
-                                    )
-                                    if frag_info.get("success"):
-                                        new_row["top_notes"]   = ", ".join(frag_info.get("top_notes", []))
-                                        new_row["heart_notes"] = ", ".join(frag_info.get("middle_notes", []))
-                                        new_row["base_notes"]  = ", ".join(frag_info.get("base_notes", []))
-                                    processed_rows.append(new_row)
+                                        new_row = _e_row.copy()
+                                        new_row["وصف_AI"] = html_body or seo_data.get("markdown_desc", "")
+                                        new_row["الماركة_الرسمية"] = seo_data.get(
+                                            "exact_brand",
+                                            str(_e_row.get("الماركة", "")),
+                                        )
+                                        new_row["التصنيف_الرسمي"] = seo_data.get(
+                                            "exact_category",
+                                            "العطور",
+                                        )
+                                        if frag_info.get("success"):
+                                            new_row["top_notes"]   = ", ".join(frag_info.get("top_notes", []))
+                                            new_row["heart_notes"] = ", ".join(frag_info.get("middle_notes", []))
+                                            new_row["base_notes"]  = ", ".join(frag_info.get("base_notes", []))
+                                        processed_rows.append(new_row)
+                                    except Exception as _enrich_err:
+                                        # فشل إثراء منتج واحد → أضفه بدون إثراء
+                                        processed_rows.append(_e_row.copy())
+                                        st.write(f"  ⚠️ تعذّر إثراء: {str(_enrich_err)[:50]}")
 
                                 status.update(label="✅ اكتملت المعالجة!", state="complete", expanded=False)
 
@@ -4358,8 +4402,6 @@ elif page == "🔍 منتجات مفقودة":
                             type="primary",
                             use_container_width=True,
                             help=f"يحتوي على {_csv_count} منتج — قالب سلة الرسمي مع صف بيانات المنتج",
-                        
-                            on_click="ignore"
                         )
                     except Exception as _csv_exp:
                         st.error(f"❌ فشل توليد CSV سلة: {_csv_exp}")
@@ -4375,8 +4417,6 @@ elif page == "🔍 منتجات مفقودة":
                             file_name="mahwous_missing_ready.xlsx",
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                             use_container_width=True,
-                        
-                            on_click="ignore"
                         )
                     except Exception as _xlsx_exp:
                         st.error(f"❌ فشل توليد XLSX: {_xlsx_exp}")
@@ -4976,14 +5016,19 @@ elif page == "⚠️ تحت المراجعة":
                 excel_rv = export_to_excel(df, "مراجعة")
                 st.download_button("📥 Excel", data=excel_rv, file_name="review.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="rv_dl",
-                        on_click="ignore"
                     )
 
             # ── فلتر بحث ──────────────────────────────────────────────────
             search_rv = st.text_input("🔎 بحث في المنتجات", key="rv_search")
             df_rv = df.copy()
             if search_rv:
-                df_rv = df_rv[df_rv.apply(lambda r: search_rv.lower() in str(r.values).lower(), axis=1)]
+                _rv_lower = search_rv.lower()
+                # بحث vectorized سريع بدل lambda بطيء
+                _rv_mask = pd.Series(False, index=df_rv.index)
+                for _rc in ("المنتج", "منتج_المنافس", "المنافس", "الماركة"):
+                    if _rc in df_rv.columns:
+                        _rv_mask = _rv_mask | df_rv[_rc].astype(str).str.lower().str.contains(_rv_lower, na=False, regex=False)
+                df_rv = df_rv[_rv_mask]
 
             st.caption(f"{len(df_rv)} منتج للمراجعة")
 
@@ -5368,7 +5413,6 @@ elif page in ("✔️ تمت المعالجة", "✅ تمت المعالجة"):
         csv_proc = df_proc.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig")
         st.download_button("📥 تصدير CSV", data=csv_proc,
                            file_name="processed_products.csv", mime="text/csv",
-                               on_click="ignore"
                            )
 
 
@@ -6232,7 +6276,8 @@ elif page == "🕷️ كشط المنافسين":
 
     def _load_stores() -> list:
         try:
-            raw = _json_sc.loads(open(_COMPETITORS_FILE, encoding="utf-8").read())
+            with open(_COMPETITORS_FILE, encoding="utf-8") as _cf:
+                raw = _json_sc.loads(_cf.read())
             if not isinstance(raw, list):
                 return []
             # Normalize: entries may be plain URL strings or dicts with
@@ -6440,6 +6485,11 @@ elif page == "🕷️ كشط المنافسين":
                 start_new_session=True,  # عملية مستقلة تماماً عن Streamlit
             )
 
+            # إغلاق مقبض الملف بعد تمريره للعملية الفرعية — لمنع تسرب file descriptors
+            try:
+                log_fh.close()
+            except Exception:
+                pass
             # حفظ PID فوراً قبل أي شيء آخر
             with open(_PID_FILE, "w", encoding="utf-8") as pf:
                 pf.write(str(proc.pid))
