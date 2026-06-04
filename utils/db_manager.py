@@ -1968,7 +1968,7 @@ def upsert_competitor_products(
     }
 
 
-def get_all_competitor_products(competitor: str = "", limit: int = 30000) -> list[dict]:
+def get_all_competitor_products(competitor: str = "", limit: int = 150000) -> list[dict]:
     """يُرجع منتجات المنافس — مع حد أقصى لحماية الذاكرة."""
     init_competitor_store()
     conn = get_db()
