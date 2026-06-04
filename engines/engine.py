@@ -1440,11 +1440,65 @@ def apply_user_column_map(df, name=None, price=None, id_col=None, img=None, url=
 
 
 # ═══════════════════════════════════════════════════════
+# ⚡ v31.8: ثوابت مسبقة الحساب — خارج الحلقات
+# ═══════════════════════════════════════════════════════
+_NUM_WORDS = {
+    'ون':'1','تو':'2','ثري':'3','فور':'4','فايف':'5',
+    'سكس':'6','سفن':'7','ايت':'8','ناين':'9','تن':'10',
+    'one':'1','two':'2','three':'3','four':'4','five':'5',
+    'six':'6','seven':'7','eight':'8','nine':'9','ten':'10',
+    'i':'1','ii':'2','iii':'3','iv':'4','v':'5',
+    'vi':'6','vii':'7','viii':'8','ix':'9','x':'10',
+}
+
+_RE_PROD_NUM  = re.compile(r'(?:no|num|number|نمبر|رقم|№|#)\s*(\d+)', re.IGNORECASE)
+_RE_STUCK_NUM = re.compile(r'[a-z\u0600-\u06FF](\d+)', re.IGNORECASE)
+_RE_SOLO_NUM  = re.compile(r'\b(\d{1,3})\b')
+_SIZE_NUMBERS = {'100','50','30','200','150','75','80','125','250','300','ml'}
+_PROD_NUMBERS = {'212','360','1','2','3','4','5','6','7','8','9','11','12','13','14','15','16','17','18','19','21'}
+
+def _extract_product_numbers(text):
+    """Extract product-identifying numbers (not sizes) — module-level for speed."""
+    nums = set()
+    tl = text.lower()
+    for m in _RE_PROD_NUM.finditer(tl):
+        nums.add(m.group(1))
+    for word, num in _NUM_WORDS.items():
+        if f'نمبر {word}' in tl or f'number {word}' in tl or f'no {word}' in tl or f'رقم {word}' in tl:
+            nums.add(num)
+    for m in _RE_STUCK_NUM.finditer(tl):
+        v = m.group(1)
+        if v not in _SIZE_NUMBERS:
+            nums.add(v)
+    for m in _RE_SOLO_NUM.finditer(tl):
+        v = m.group(1)
+        pos = m.end()
+        after = tl[pos:pos+5].strip()
+        if after.startswith('ml') or after.startswith('مل'):
+            continue
+        if v in _PROD_NUMBERS:
+            nums.add(v)
+    return nums
+
+_FLANKER_WORDS = [
+    'sport', 'سبورت', 'intense', 'انتنس', 'إنتنس', 'elixir', 'الكسير', 'إلكسير',
+    'oud', 'عود', 'absolu', 'ابسولو', 'leather', 'ليذر', 'black', 'بلاك',
+    'extreme', 'اكستريم', 'poudree', 'بودريه',
+]
+_FLANKER_RES = []
+for _fw in _FLANKER_WORDS:
+    try:
+        _FLANKER_RES.append(re.compile(r'\b' + re.escape(_fw) + r'\b', re.IGNORECASE))
+    except re.error:
+        _FLANKER_RES.append(None)
+
+
+# ═══════════════════════════════════════════════════════
 #  الكلاس الجديد: Pre-normalized Competitor Index
 #  يُبنى مرة واحدة لكل ملف منافس ← يسرّع الـ matching 5x
 # ═══════════════════════════════════════════════════════
 class CompIndex:
-    """فهرس المنافس المطبَّع مسبقاً"""
+    """⚡ v31.8: فهرس المنافس — يستخدم الاستخراج المسبق من DB إذا توفر"""
     def __init__(self, df, name_col, id_col, comp_name, img_col=None, url_col=None):
         self.comp_name = comp_name
         self.name_col  = name_col
@@ -1454,16 +1508,48 @@ class CompIndex:
         self.df        = df.reset_index(drop=True)
         self.raw_names  = self.df[self.name_col].fillna("").astype(str).tolist()
         self.norm_names = [normalize(n) for n in self.raw_names]
-        self.agg_names  = [normalize_name(n) for n in self.raw_names]
-        self.brands     = [extract_brand(n) for n in self.raw_names]
-        self.sizes      = [extract_size(n) for n in self.raw_names]
-        self.types      = [extract_type(n) for n in self.raw_names]
-        self.genders    = [extract_gender(n) for n in self.raw_names]
-        self.plines     = [extract_product_line(n, self.brands[i]) for i, n in enumerate(self.raw_names)]
-        # ⚡ v31: pre-compute classify_product لكل منتج — يمنع إعادة الحساب في search()
-        self.classes    = [classify_product(n) for n in self.raw_names]
-        self.prices     = [_price(row) for _, row in self.df.iterrows()]
-        self.ids        = [_pid(row, id_col) for _, row in self.df.iterrows()]
+
+        # ⚡ v31.8: استخدم الأعمدة المسبقة إذا توفرت (من DB) — أسرع 30x
+        _has_pre = "extracted_brand" in self.df.columns and self.df["extracted_brand"].notna().any()
+
+        if _has_pre:
+            # DB pre-computed — تحميل فوري
+            self.agg_names = self.df["agg_name"].fillna("").astype(str).tolist()
+            self.brands    = self.df["extracted_brand"].fillna("").astype(str).tolist()
+            self.sizes     = pd.to_numeric(self.df["extracted_size"], errors='coerce').fillna(0).tolist()
+            self.types     = self.df["extracted_type"].fillna("").astype(str).tolist()
+            self.genders   = self.df["extracted_gender"].fillna("").astype(str).tolist()
+            self.plines    = self.df["product_line"].fillna("").astype(str).tolist()
+            self.classes   = self.df["extracted_class"].fillna("").astype(str).tolist()
+            # ملء القيم الفارغة فقط
+            for i, n in enumerate(self.raw_names):
+                if not self.brands[i]:
+                    self.brands[i] = extract_brand(n) or ""
+                if not self.agg_names[i]:
+                    self.agg_names[i] = normalize_name(n) or ""
+                if not self.classes[i]:
+                    self.classes[i] = classify_product(n) or ""
+        else:
+            # لا يوجد استخراج مسبق — حساب كامل (ملفات مرفوعة يدوياً)
+            self.agg_names  = [normalize_name(n) for n in self.raw_names]
+            self.brands     = [extract_brand(n) for n in self.raw_names]
+            self.sizes      = [extract_size(n) for n in self.raw_names]
+            self.types      = [extract_type(n) for n in self.raw_names]
+            self.genders    = [extract_gender(n) for n in self.raw_names]
+            self.plines     = [extract_product_line(n, self.brands[i]) for i, n in enumerate(self.raw_names)]
+            self.classes    = [classify_product(n) for n in self.raw_names]
+
+        # ⚡ v31.8: pre-compute prices بدل iterrows البطيء
+        _price_cols = [c for c in ['السعر','سعر المنتج','Price','price'] if c in self.df.columns]
+        if _price_cols:
+            self.prices = pd.to_numeric(self.df[_price_cols[0]].astype(str).str.replace(',','',regex=False), errors='coerce').fillna(0).tolist()
+        else:
+            self.prices = [_price(row) for _, row in self.df.iterrows()]
+        _id_cols = [id_col] if id_col and id_col in self.df.columns else []
+        if _id_cols:
+            self.ids = self.df[_id_cols[0]].fillna('').astype(str).str.strip().tolist()
+        else:
+            self.ids = [''] * len(self.df)
         n = len(self.df)
         if self.img_col and self.img_col in self.df.columns:
             self.extra_imgs = self.df[self.img_col].fillna("").astype(str).str.strip().tolist()
@@ -1474,38 +1560,38 @@ class CompIndex:
         else:
             self.extra_urls = [""] * n
 
-        # ⚡ v33: Brand Index — تقسيم المنتجات بالماركة لتسريع البحث ~5x
+        # ⚡ v31.8: pre-compute normalized brands + product numbers
+        self.norm_brands = [normalize(b).lower() if b else '' for b in self.brands]
+        self.prod_nums   = [_extract_product_numbers(n) for n in self.norm_names]
+
+        # ⚡ v33: Brand Index
         self._brand_index: dict[str, list[int]] = {}
-        for i, br in enumerate(self.brands):
-            br_key = normalize(br).lower() if br else ""
-            if br_key not in self._brand_index:
-                self._brand_index[br_key] = []
-            self._brand_index[br_key].append(i)
+        for i, nbr in enumerate(self.norm_brands):
+            if nbr not in self._brand_index:
+                self._brand_index[nbr] = []
+            self._brand_index[nbr].append(i)
 
     def search(self, our_norm, our_br, our_sz, our_tp, our_gd, our_pline="", top_n=6):
-        """بحث vectorized بـ rapidfuzz process.extract مع مقارنة خط الإنتاج"""
+        """⚡ v31.8: بحث محسّن — ثوابت خارج الحلقة + pre-compiled regex"""
         if not self.norm_names: return []
 
-        # استبعاد العينات مسبقاً
         valid_idx = [i for i, n in enumerate(self.raw_names) if not is_sample(n)]
         if not valid_idx: return []
 
-        # ⚡ v33: Brand-First Search — فلتر بالماركة أولاً لتقليل المقارنات ~80%
-        _use_brand_filter = False
-        if our_br:
-            _br_key = normalize(our_br).lower()
-            _brand_candidates = self._brand_index.get(_br_key, [])
-            if len(_brand_candidates) >= 3:  # يكفي 3+ منتجات للبحث الموجّه
+        # ⚡ v31.8: normalize(our_br) مرة واحدة فقط
+        _our_br_norm = normalize(our_br).lower() if our_br else ""
+
+        # ⚡ v33: Brand-First Search
+        if _our_br_norm:
+            _brand_candidates = self._brand_index.get(_our_br_norm, [])
+            if len(_brand_candidates) >= 3:
                 _brand_set = set(_brand_candidates)
                 _filtered_valid = [i for i in valid_idx if i in _brand_set]
                 if len(_filtered_valid) >= 3:
                     valid_idx = _filtered_valid
-                    _use_brand_filter = True
 
-        valid_norms = [self.norm_names[i] for i in valid_idx]
         valid_aggs = [self.agg_names[i] for i in valid_idx]
 
-        # ← استخدم agg_names للمطابقة (أدق للعربية)
         our_agg = normalize_name(our_norm) if our_norm else our_norm
         fast = rf_process.extract(
             our_agg, valid_aggs,
@@ -1515,9 +1601,13 @@ class CompIndex:
 
         cands = []
         seen  = set()
-        our_class = classify_product(our_norm)  # ⚡ v31: يُحسب مرة واحدة خارج الحلقة
+        our_class = classify_product(our_norm)
+        # ⚡ v31.8: pre-compute per-search constants
+        our_pnums = _extract_product_numbers(our_norm) if our_norm else set()
+        o_n_low = our_norm.lower() if our_norm else ""
+
         for _, fast_score, vi in fast:
-            if fast_score < 45: continue  # ← يسمح بـ 45+ للمراجعة (60-85%)
+            if fast_score < 45: continue
             idx  = valid_idx[vi]
             name = self.raw_names[idx]
             if name in seen: continue
@@ -1529,109 +1619,65 @@ class CompIndex:
             c_pl = self.plines[idx]
 
             # ═══ فلاتر سريعة ═══
-            if our_br and c_br and normalize(our_br) != normalize(c_br): continue
+            if _our_br_norm and c_br and _our_br_norm != self.norm_brands[idx]: continue
             if our_sz > 0 and c_sz > 0 and abs(our_sz - c_sz) > 30: continue
             if our_tp and c_tp and our_tp != c_tp:
                 if our_sz > 0 and c_sz > 0 and abs(our_sz - c_sz) > 3: continue
             if our_gd and c_gd and our_gd != c_gd: continue
 
-            # ═══ ⚡ v31: فلتر تصنيف المنتج — our_class خارج الحلقة، c_class من المصفوفة المحسوبة مسبقاً ═══
-            c_class = self.classes[idx]  # ⚡ pre-computed في __init__
+            # ═══ فلتر تصنيف المنتج ═══
+            c_class = self.classes[idx]
             if our_class != c_class:
-                # العينات تُستثنى تماماً
                 if our_class == 'rejected' or c_class == 'rejected':
                     continue
-                # المجموعات ومعطرات الشعر/الجسم لا تقارن مع العطور
                 if our_class in ('hair_mist','body_mist','set','other') or \
                    c_class in ('hair_mist','body_mist','set','other'):
                     continue
-                # التستر يقارن فقط مع التستر، العطر الأساسي فقط مع الأساسي
                 if (our_class == 'tester') != (c_class == 'tester'):
                     continue
 
-            # ═══ مقارنة الأرقام في أسماء المنتجات (نمبر 11 ≠ نمبر 10) ═══
-            _NUM_WORDS = {
-                'ون':'1','تو':'2','ثري':'3','فور':'4','فايف':'5',
-                'سكس':'6','سفن':'7','ايت':'8','ناين':'9','تن':'10',
-                'one':'1','two':'2','three':'3','four':'4','five':'5',
-                'six':'6','seven':'7','eight':'8','nine':'9','ten':'10',
-                'i':'1','ii':'2','iii':'3','iv':'4','v':'5',
-                'vi':'6','vii':'7','viii':'8','ix':'9','x':'10',
-            }
-            def _extract_product_numbers(text):
-                """Extract product-identifying numbers (not sizes)"""
-                nums = set()
-                # استخراج الأرقام الرقمية
-                for m in re.finditer(r'(?:no|num|number|نمبر|رقم|№|#)\s*(\d+)', text.lower()):
-                    nums.add(m.group(1))
-                # استخراج الأرقام النصية (ون، تو، سفن...)
-                tl = text.lower()
-                for word, num in _NUM_WORDS.items():
-                    if f'نمبر {word}' in tl or f'number {word}' in tl or f'no {word}' in tl or f'رقم {word}' in tl:
-                        nums.add(num)
-                # استخراج أرقام ملتصقة بكلمات (مثل سفن7)
-                for m in re.finditer(r'[a-z؀-ۿ](\d+)', text.lower()):
-                    v = m.group(1)
-                    if v not in {'100','50','30','200','150','75','80','125','250','300','ml'}:
-                        nums.add(v)
-                # أرقام مستقلة ليست أحجام (مثل 212, 360, 9)
-                for m in re.finditer(r'\b(\d{1,3})\b', text.lower()):
-                    v = m.group(1)
-                    # استثناء الأحجام الشائعة فقط إذا كانت متبوعة بـ ml/مل
-                    pos = m.end()
-                    after = text.lower()[pos:pos+5].strip()
-                    if after.startswith('ml') or after.startswith('مل'):
-                        continue  # هذا حجم
-                    if v in {'212','360','1','2','3','4','5','6','7','8','9','11','12','13','14','15','16','17','18','19','21'}:
-                        nums.add(v)
-                return nums
-
-            our_pnums = _extract_product_numbers(our_norm)
-            c_pnums = _extract_product_numbers(self.norm_names[idx])
+            # ═══ مقارنة الأرقام — pre-computed ═══
+            c_pnums = self.prod_nums[idx]
             if our_pnums and c_pnums and our_pnums != c_pnums:
                 continue
 
-            # ═══ مقارنة خط الإنتاج (الحل الجذري الصارم) ═══
+            # ═══ مقارنة خط الإنتاج ═══
             pline_penalty = 0
             if our_pline and c_pl:
                 pl_score = fuzz.token_sort_ratio(our_pline, c_pl)
                 if our_br and c_br:
-                    # نفس الماركة -> لا تسامح مع اختلاف اسم العطر
                     if pl_score < 78:
-                        continue  # رفض نهائي - أسماء العطور مختلفة
+                        continue
                     elif pl_score < 88:
                         pline_penalty = -25
                     elif pl_score < 94:
                         pline_penalty = -10
                 else:
-                    # إحدى الماركات مجهولة -> نرفض بشراسة إذا اختلفت الأسماء
                     if pl_score < 50:
-                        continue  # رفض نهائي
+                        continue
                     elif pl_score < 65:
                         pline_penalty = -45
                     elif pl_score < 80:
                         pline_penalty = -25
 
-            # ═══ score تفصيلي — يستخدم agg للمقارنة ═══
-            n1 = our_agg   # normalize_aggressive
+            # ═══ score تفصيلي ═══
+            n1 = our_agg
             n2 = self.agg_names[idx]
             s1 = fuzz.token_sort_ratio(n1, n2)
             s2 = fuzz.token_set_ratio(n1, n2)
             s3 = fuzz.partial_ratio(n1, n2)
-            base = s1*0.30 + s2*0.50 + s3*0.20   # token_set الوزن الأعلى
+            base = s1*0.30 + s2*0.50 + s3*0.20
 
-            # ═══ تعديلات الماركة ═══
-            if our_br and c_br:
-                base += 10 if normalize(our_br)==normalize(c_br) else -25
+            # ═══ تعديلات الماركة — pre-computed ═══
+            if _our_br_norm and c_br:
+                base += 10 if _our_br_norm == self.norm_brands[idx] else -25
             elif our_br and not c_br:
-                base -= 25  # منتجنا له ماركة لكن المنافس بدون → خصم كبير
+                base -= 25
             elif not our_br and c_br:
-                base -= 25  # العكس
+                base -= 25
             elif not our_br and not c_br:
-                # كلاهما بدون ماركة → خصم لأن المطابقة غير موثوقة
                 base -= 10
 
-            # إذا فشل النظام في تحديد اسم العطر الفعلي لأحدهما
             if not our_pline or not c_pl:
                 base -= 20
 
@@ -1640,46 +1686,32 @@ class CompIndex:
                 d = abs(our_sz - c_sz)
                 base += 10 if d==0 else (-5 if d<=5 else -18 if d<=20 else -30)
 
-            # ═══ فحص التركيز الصارم (EDT vs EDP vs Parfum) ═══
             if our_tp and c_tp and our_tp != c_tp:
-                # عقوبة قاسية جداً لضمان نزول التقييم تحت 85%
                 base -= 40
 
             if our_gd and c_gd and our_gd != c_gd:
-                continue  # رفض نهائي - رجالي ≠ نسائي
+                continue
             elif (our_gd or c_gd) and our_gd != c_gd:
-                base -= 15  # أحدهما محدد والآخر فارغ
+                base -= 15
 
-            # ═══ تطبيق عقوبة خط الإنتاج ═══
             base += pline_penalty
 
-            # ═══ صمام أمان الإصدارات الخاصة (Flankers Guard) ═══
-            # يمنع تطابق النسخة الأساسية مع سبورت، انتنس، الكسير، إلخ
-            flankers = [
-                'sport', 'سبورت', 'intense', 'انتنس', 'إنتنس', 'elixir', 'الكسير', 'إلكسير',
-                'oud', 'عود', 'absolu', 'ابسولو', 'leather', 'ليذر', 'black', 'بلاك',
-                'extreme', 'اكستريم', 'poudree', 'بودريه',
-            ]
-
-            o_n_low = our_norm.lower() if our_norm else ""
+            # ═══ Flankers Guard — pre-compiled regex ═══
             c_n_low = name.lower() if name else ""
-
-            for f in flankers:
-                f_pattern = r'\b' + re.escape(f) + r'\b'
-                try:
-                    has_f_our = bool(re.search(f_pattern, o_n_low))
-                    has_f_comp = bool(re.search(f_pattern, c_n_low))
-                except re.error:
-                    has_f_our = f in o_n_low
-                    has_f_comp = f in c_n_low
-
+            for fi, fp in enumerate(_FLANKER_RES):
+                if fp is None:
+                    fw = _FLANKER_WORDS[fi]
+                    has_f_our = fw in o_n_low
+                    has_f_comp = fw in c_n_low
+                else:
+                    has_f_our = bool(fp.search(o_n_low))
+                    has_f_comp = bool(fp.search(c_n_low))
                 if has_f_our != has_f_comp:
-                    base -= 35  # عقوبة صارمة تكسر التطابق الوهمي فوراً
+                    base -= 35
                     break
 
-            # حساب النتيجة النهائية بعد كل العقوبات القاسية
             score = round(max(0, min(100, base)), 1)
-            if score < 60: continue   # ← 60% الحد الأدنى للمراجعة
+            if score < 60: continue
 
             seen.add(name)
             img_u = self.extra_imgs[idx] if idx < len(self.extra_imgs) else ""

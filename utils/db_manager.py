@@ -1664,8 +1664,80 @@ def init_competitor_store() -> None:
         updated_at    TEXT DEFAULT (datetime('now','localtime')),
         UNIQUE(competitor, norm_name)
     )""")
+    # ⚡ v31.8: أعمدة الاستخراج المسبق — تُضاف تلقائياً إذا لم تكن موجودة
+    _new_cols = [
+        ("extracted_brand", "TEXT DEFAULT ''"),
+        ("extracted_size",  "REAL DEFAULT 0"),
+        ("extracted_type",  "TEXT DEFAULT ''"),
+        ("extracted_gender","TEXT DEFAULT ''"),
+        ("extracted_class", "TEXT DEFAULT ''"),
+        ("agg_name",        "TEXT DEFAULT ''"),
+        ("product_line",    "TEXT DEFAULT ''"),
+    ]
+    existing = {r[1] for r in conn.execute("PRAGMA table_info(competitor_products_store)").fetchall()}
+    for col_name, col_type in _new_cols:
+        if col_name not in existing:
+            try:
+                conn.execute(f"ALTER TABLE competitor_products_store ADD COLUMN {col_name} {col_type}")
+            except Exception:
+                pass
     conn.commit()
     conn.close()
+
+
+def fill_extracted_features(batch_size: int = 5000) -> int:
+    """⚡ v31.8: ملء أعمدة الاستخراج المسبق — يعمل مرة واحدة.
+    يعود بعدد الصفوف المحدّثة."""
+    init_competitor_store()
+    conn = get_db()
+    # فحص: هل هناك صفوف تحتاج ملء؟
+    need = conn.execute(
+        "SELECT COUNT(*) FROM competitor_products_store WHERE extracted_brand = '' OR extracted_brand IS NULL"
+    ).fetchone()[0]
+    if need == 0:
+        conn.close()
+        return 0
+
+    # استيراد محلي لتجنب circular import
+    from engines.engine import (
+        extract_brand, extract_size, extract_type, extract_gender,
+        classify_product, normalize_name, extract_product_line
+    )
+
+    updated = 0
+    offset = 0
+    while True:
+        rows = conn.execute(
+            """SELECT id, product_name FROM competitor_products_store
+               WHERE extracted_brand = '' OR extracted_brand IS NULL
+               LIMIT ? OFFSET ?""",
+            (batch_size, offset)
+        ).fetchall()
+        if not rows:
+            break
+        updates = []
+        for row_id, pname in rows:
+            pname = str(pname or "")
+            br = extract_brand(pname) or ""
+            sz = extract_size(pname)
+            tp = extract_type(pname) or ""
+            gd = extract_gender(pname) or ""
+            cl = classify_product(pname) or ""
+            agg = normalize_name(pname) or ""
+            pl = extract_product_line(pname, br) or ""
+            updates.append((br, sz, tp, gd, cl, agg, pl, row_id))
+        conn.executemany(
+            """UPDATE competitor_products_store SET
+                extracted_brand=?, extracted_size=?, extracted_type=?,
+                extracted_gender=?, extracted_class=?, agg_name=?, product_line=?
+               WHERE id=?""",
+            updates
+        )
+        conn.commit()
+        updated += len(updates)
+        offset += batch_size
+    conn.close()
+    return updated
 
 
 def _normalize_for_store(s: str) -> str:
@@ -1972,10 +2044,18 @@ def get_all_competitor_products(competitor: str = "", limit: int = 150000) -> li
     """يُرجع منتجات المنافس — مع حد أقصى لحماية الذاكرة."""
     init_competitor_store()
     conn = get_db()
+    _extra = """,
+                      COALESCE(extracted_brand,'') as extracted_brand,
+                      COALESCE(extracted_size,0) as extracted_size,
+                      COALESCE(extracted_type,'') as extracted_type,
+                      COALESCE(extracted_gender,'') as extracted_gender,
+                      COALESCE(extracted_class,'') as extracted_class,
+                      COALESCE(agg_name,'') as agg_name,
+                      COALESCE(product_line,'') as product_line"""
     if competitor:
         rows = conn.execute(
-            """SELECT competitor, product_name, price, image_url, product_url,
-                      brand, size, gender, added_at, updated_at
+            f"""SELECT competitor, product_name, price, image_url, product_url,
+                      brand, size, gender, added_at, updated_at{_extra}
                FROM competitor_products_store WHERE competitor=?
                ORDER BY price DESC
                LIMIT ?""",
@@ -1983,8 +2063,8 @@ def get_all_competitor_products(competitor: str = "", limit: int = 150000) -> li
         ).fetchall()
     else:
         rows = conn.execute(
-            """SELECT competitor, product_name, price, image_url, product_url,
-                      brand, size, gender, added_at, updated_at
+            f"""SELECT competitor, product_name, price, image_url, product_url,
+                      brand, size, gender, added_at, updated_at{_extra}
                FROM competitor_products_store
                WHERE price > 0
                ORDER BY updated_at DESC
