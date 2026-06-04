@@ -3098,7 +3098,7 @@ if page == "📊 لوحة التحكم":
         # Phase 1: التحقق من وجود بيانات منافسين في المخزن التراكمي (DB)
         _db_store_stats = get_competitor_store_stats()
         _has_db_competitors = _db_store_stats.get("total_products", 0) > 0
-        if not our_file:
+        if not our_file and st.session_state.get("our_df") is None:
             st.warning("⚠️ ارفع ملف منتجاتنا أولاً")
         elif not _auto_mode and not comp_files and not _has_db_competitors:
             st.warning("⚠️ ارفع ملف منافس واحد على الأقل، أو فعّل الكشط التلقائي")
@@ -3115,14 +3115,25 @@ if page == "📊 لوحة التحكم":
                 else "⏳ جاري قراءة الملفات (بدون تحديث كتالوج قاعدة البيانات)..."
             )
             with st.spinner(_spin_read):
-                try:
-                    our_file.seek(0)
-                except Exception:
-                    pass
-                our_df, err = read_file(our_file)
-                if err:
-                    st.error(f"❌ {err}")
+                if our_file:
+                    # ── قراءة من الملف المرفوع ──
+                    try:
+                        our_file.seek(0)
+                    except Exception:
+                        pass
+                    our_df, err = read_file(our_file)
+                    if err:
+                        st.error(f"❌ {err}")
+                elif st.session_state.get("our_df") is not None:
+                    # ── استخدام الكتالوج المحفوظ في الجلسة ──
+                    our_df = st.session_state.our_df.copy()
+                    err = None
+                    st.info("📋 يُستخدم ملف المنتجات المحفوظ تلقائياً")
                 else:
+                    our_df = None
+                    err = "لا يوجد ملف منتجات"
+
+                if not err and our_df is not None:
                     our_df = apply_user_column_map(our_df, **_effective_column_map(our_df, "dash_map_our"))
                     if max_rows > 0:
                         our_df = our_df.head(int(max_rows))
