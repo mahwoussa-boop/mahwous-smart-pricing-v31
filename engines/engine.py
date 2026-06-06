@@ -1606,24 +1606,30 @@ class CompIndex:
                 self._brand_index[nbr] = []
             self._brand_index[nbr].append(i)
 
+        # ⚡ v22: pre-compute non-sample set ONCE (was 108K×7928 calls)
+        self._nonsample_set = frozenset(i for i, n in enumerate(self.raw_names) if not is_sample(n))
+
     def search(self, our_norm, our_br, our_sz, our_tp, our_gd, our_pline="", top_n=6):
         """⚡ v31.8: بحث محسّن — ثوابت خارج الحلقة + pre-compiled regex"""
         if not self.norm_names: return []
 
-        valid_idx = [i for i, n in enumerate(self.raw_names) if not is_sample(n)]
-        if not valid_idx: return []
-
         # ⚡ v31.8: normalize(our_br) مرة واحدة فقط
         _our_br_norm = normalize(our_br).lower() if our_br else ""
 
-        # ⚡ v33: Brand-First Search
-        if _our_br_norm:
-            _brand_candidates = self._brand_index.get(_our_br_norm, [])
-            if len(_brand_candidates) >= 3:
-                _brand_set = set(_brand_candidates)
-                _filtered_valid = [i for i in valid_idx if i in _brand_set]
-                if len(_filtered_valid) >= 3:
-                    valid_idx = _filtered_valid
+        # ⚡ v22: Brand-First Search is MANDATORY (matches mandatory brand filter)
+        # No brand → mandatory filter rejects all → return empty immediately
+        if not _our_br_norm:
+            return []
+
+        _brand_candidates = self._brand_index.get(_our_br_norm, [])
+        if not _brand_candidates:
+            return []  # No competitors with this brand
+
+        # ⚡ v22: intersect brand candidates with pre-computed non-sample set
+        # (hundreds instead of 108K per call)
+        valid_idx = [i for i in _brand_candidates if i in self._nonsample_set]
+        if not valid_idx:
+            return []
 
         valid_aggs = [self.agg_names[i] for i in valid_idx]
 
@@ -2309,7 +2315,7 @@ def run_full_analysis(our_df, comp_dfs, progress_callback=None, use_ai=True,
             "الكود","كود","Code","code","الرقم","رقم","Barcode","barcode","الباركود"
         ]) or ""
         c_img = _fcol_optional(cdf, [
-            "صورة المنتج", "صوره المنتج", "image", "Image", "product_image", "الصورة",
+            "صورة المنتج", "صوره المنتج", "image_url", "image", "Image", "product_image", "الصورة",
         ])
         c_url = _fcol_optional(cdf, [
             "رابط المنتج", "الرابط", "رابط", "product_url", "link", "url", "URL",
