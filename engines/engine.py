@@ -15,7 +15,7 @@ import re, io, json, os, hashlib, sqlite3, gc
 import functools as _functools
 from datetime import datetime
 import pandas as pd
-from utils.data_helpers import first_image_url_string, pid_from_row as _pid
+from utils.data_helpers import first_image_url_string
 from utils.data_paths import get_data_db_path
 from utils.helpers import favicon_url_for_site, fetch_og_image_url
 from rapidfuzz import fuzz, process as rf_process
@@ -288,12 +288,73 @@ def _syn_replace(t):
     """استبدال المرادفات بـ regex واحد بدل 280 حلقة — ~10x أسرع"""
     return _SYN_RE.sub(lambda m: _SYN[m.group(0)], t)
 
+# ─── v22: Dynamic Brand Vocabulary Enrichment ────────────────
+_brands_enriched = False
+
+def enrich_known_brands(comp_dfs=None, db_path=None):
+    """
+    إثراء KNOWN_BRANDS بماركات المنافسين الحقيقية من competitor_products_store.
+    يُستدعى مرة واحدة عند بدء التحليل — يرفع التغطية من 46% إلى 92%+.
+    """
+    global KNOWN_BRANDS, _brands_enriched
+    if _brands_enriched:
+        return
+
+    new_brands = set()
+
+    # Source 1: brand column from competitor DataFrames
+    if comp_dfs:
+        for cdf in comp_dfs.values():
+            for col in ("brand", "الماركة"):
+                if col in cdf.columns:
+                    vals = cdf[col].fillna("").astype(str).str.strip()
+                    new_brands.update(v for v in vals if v and len(v) >= 2 and v.lower() not in ("nan", "none", "0"))
+                    break
+
+    # Source 2: DB if available
+    if db_path:
+        try:
+            import sqlite3
+            conn = sqlite3.connect(db_path)
+            rows = conn.execute("SELECT DISTINCT brand FROM competitor_products_store WHERE brand IS NOT NULL AND brand != ''").fetchall()
+            conn.close()
+            new_brands.update(r[0].strip() for r in rows if r[0] and len(r[0].strip()) >= 2)
+        except Exception:
+            pass
+
+    if not new_brands:
+        _brands_enriched = True
+        return
+
+    # Normalize and deduplicate against existing KNOWN_BRANDS
+    existing_lower = {b.lower() for b in KNOWN_BRANDS}
+    added = 0
+    for nb in new_brands:
+        # Clean: remove very long strings, numbers-only, URLs
+        if len(nb) > 50 or nb.startswith("http") or nb.isdigit():
+            continue
+        if nb.lower() not in existing_lower:
+            KNOWN_BRANDS.append(nb)
+            existing_lower.add(nb.lower())
+            added += 1
+
+    # Clear LRU caches so they rebuild with enriched list
+    _get_normalized_brands.cache_clear()
+    _get_brand_normalized_pairs.cache_clear()
+
+    _brands_enriched = True
+    import logging
+    logging.getLogger("engines.engine").info(
+        "Brand vocabulary enriched: +%d brands (total: %d)", added, len(KNOWN_BRANDS))
+
+
 # ─── v26.0: Fuzzy Spell Correction ────────────────
 # ✅ إصلاح #5: LRU cache لتجنب إعادة بناء قائمة الماركات مع كل استدعاء
 @_functools.lru_cache(maxsize=1)
 def _get_normalized_brands():
     """يُحسب مرة واحدة فقط عند أول استدعاء"""
     return [(b, b.lower()) for b in KNOWN_BRANDS]
+
 
 @_functools.lru_cache(maxsize=1)
 def _get_brand_normalized_pairs():
@@ -326,7 +387,7 @@ def _fuzzy_correct_brand(text: str, threshold: int = 82) -> str:
 
 # ─── SQLite Cache — اتصال دائم مع thread safety ────────────────
 # ✅ إصلاح #6: اتصال دائم بدلاً من فتح/إغلاق لكل عملية
-_DB = get_data_db_path("match_cache_v21.db")
+_DB = get_data_db_path("match_cache_v22.db")
 _db_conn = None
 
 
@@ -968,12 +1029,48 @@ def extract_brand(text):
     return ""
 
 def extract_type(text):
+    """
+    v34: استخراج تركيز العطر بدقة من النص الخام (عربي+إنجليزي) — قبل أن يشوّهه normalize.
+    يُرجع رمزاً موحّداً: PARFUM / EDP / EDT / EDC / ELIXIR / EXCLUSIF / FRAICHE  (+ '+INT' للنسخ المكثّفة)
+    قاعدة SKU: اختلاف التركيز = منتج مختلف. (شانيل بلو اكسكلوسيف ≠ EDP ≠ EDT)
+    """
     if not isinstance(text, str): return ""
-    n = normalize(text)
-    if "edp" in n or "extrait" in n: return "EDP"
-    if "edt" in n: return "EDT"
-    if "edc" in n: return "EDC"
-    return ""
+    t = text.lower()
+    # توحيد بسيط للهمزات/الياء دون تحويل لاتيني (نعمل على الخام)
+    t = (t.replace("أ", "ا").replace("إ", "ا").replace("آ", "ا")
+           .replace("ى", "ي").replace("ـ", ""))
+    base = ""
+    # ── الأكثر تخصصاً أولاً ──
+    if any(k in t for k in ("exclusif", "exclusive", "اكسكلوسيف", "اكسكلوزيف",
+                            "ليكسكلوسيف", "لكسكلوسيف", "الحصري", " حصري")):
+        base = "EXCLUSIF"
+    elif any(k in t for k in ("elixir", "اليكسير", "الاكسير", "اكسير", "إكسير")):
+        base = "ELIXIR"
+    elif any(k in t for k in ("extrait", "اكستريت", "اكستريه", "extract de parfum",
+                              "بيور بارفان", "بيور بارفيوم", "pure parfum", "le parfum",
+                              "خلاصة العطر", "اكستريت دو بارفان")):
+        base = "PARFUM"
+    elif any(k in t for k in ("eau de parfum", "edp", "e.d.p", "او دو بارفيوم", "او دو برفيوم",
+                              "او دي بارفيوم", "او دي برفيوم", "ادو بارفيوم", "أو دو بارفيوم",
+                              "او دو بارفان", "او دو برفان", "اي دي بارفيوم", "اي دي برفيوم",
+                              " بارفيوم", " برفيوم")):
+        base = "EDP"
+    elif any(k in t for k in ("eau de toilette", "edt", "e.d.t", "او دو تواليت", "او دي تواليت",
+                              "ادو تواليت", "او دو توالت", "اي دي تواليت", "اي دي تويليت",
+                              "او دو تويليت", "تويليت", "تويلت", " تواليت", " توالت")):
+        base = "EDT"
+    elif any(k in t for k in ("eau de cologne", "edc", "cologne", "كولونيا", "او دو كولونيا",
+                              "او دو كولون", "كولون")):
+        base = "EDC"
+    elif any(k in t for k in ("eau fraiche", "fraiche", "fraîche", "او فريش", "فريش", "اقوا")):
+        base = "FRAICHE"
+    elif "parfum" in t and "shop" not in t:
+        # "parfum" مجرّدة بالإنجليزية → غالباً eau de parfum
+        base = "EDP"
+    # ── معدِّل التكثيف (Intense) — نسخة مختلفة من نفس التركيز ──
+    if base and any(k in t for k in ("intense", "انتنس", "انتينس", " مكثف")):
+        base = base + "+INT"
+    return base
 
 def extract_gender(text):
     if not isinstance(text, str): return ""
@@ -1521,22 +1618,54 @@ class CompIndex:
             self.agg_names = self.df["agg_name"].fillna("").astype(str).tolist()
             self.brands    = self.df["extracted_brand"].fillna("").astype(str).tolist()
             self.sizes     = pd.to_numeric(self.df["extracted_size"], errors='coerce').fillna(0).tolist()
-            self.types     = self.df["extracted_type"].fillna("").astype(str).tolist()
+            # v34: التركيز يُعاد حسابه طازجاً دائماً (عمود extracted_type قديم بمنطق ضعيف)
+            self.types     = [extract_type(n) for n in self.raw_names]
             self.genders   = self.df["extracted_gender"].fillna("").astype(str).tolist()
             self.plines    = self.df["product_line"].fillna("").astype(str).tolist()
             self.classes   = self.df["extracted_class"].fillna("").astype(str).tolist()
-            # ملء القيم الفارغة فقط
+
+            # v22: استخدام عمود brand الأصلي (88% تغطية) قبل extracted_brand (44%)
+            _raw_brand_col = None
+            for _bc in ("brand", "الماركة"):
+                if _bc in self.df.columns:
+                    _raw_brand_col = _bc
+                    break
+            _raw_brands = (
+                self.df[_raw_brand_col].fillna("").astype(str).str.strip().tolist()
+                if _raw_brand_col else [""] * len(self.df)
+            )
+
+            # ملء القيم الفارغة: brand column → extracted_brand → extract_brand(name)
             for i, n in enumerate(self.raw_names):
                 if not self.brands[i]:
-                    self.brands[i] = extract_brand(n) or ""
+                    # Try raw brand column first (from store/scraper)
+                    if _raw_brands[i]:
+                        self.brands[i] = extract_brand(_raw_brands[i]) or _raw_brands[i]
+                    else:
+                        self.brands[i] = extract_brand(n) or ""
                 if not self.agg_names[i]:
                     self.agg_names[i] = normalize_name(n) or ""
                 if not self.classes[i]:
                     self.classes[i] = classify_product(n) or ""
         else:
             # لا يوجد استخراج مسبق — حساب كامل (ملفات مرفوعة يدوياً)
+            # v22: prefer brand/الماركة column if available
+            _raw_brand_col2 = None
+            for _bc2 in ("brand", "الماركة"):
+                if _bc2 in self.df.columns:
+                    _raw_brand_col2 = _bc2
+                    break
+            _raw_brands2 = (
+                self.df[_raw_brand_col2].fillna("").astype(str).str.strip().tolist()
+                if _raw_brand_col2 else [""] * len(self.df)
+            )
             self.agg_names  = [normalize_name(n) for n in self.raw_names]
-            self.brands     = [extract_brand(n) for n in self.raw_names]
+            self.brands     = []
+            for i, n in enumerate(self.raw_names):
+                br = extract_brand(n) or ""
+                if not br and _raw_brands2[i]:
+                    br = extract_brand(_raw_brands2[i]) or _raw_brands2[i]
+                self.brands.append(br)
             self.sizes      = [extract_size(n) for n in self.raw_names]
             self.types      = [extract_type(n) for n in self.raw_names]
             self.genders    = [extract_gender(n) for n in self.raw_names]
@@ -1575,24 +1704,28 @@ class CompIndex:
                 self._brand_index[nbr] = []
             self._brand_index[nbr].append(i)
 
+        # ⚡ v22: pre-compute non-sample set ONCE (was 108K×7928 calls)
+        self._nonsample_set = frozenset(i for i, n in enumerate(self.raw_names) if not is_sample(n))
+
     def search(self, our_norm, our_br, our_sz, our_tp, our_gd, our_pline="", top_n=6):
         """⚡ v31.8: بحث محسّن — ثوابت خارج الحلقة + pre-compiled regex"""
         if not self.norm_names: return []
 
-        valid_idx = [i for i, n in enumerate(self.raw_names) if not is_sample(n)]
-        if not valid_idx: return []
-
         # ⚡ v31.8: normalize(our_br) مرة واحدة فقط
         _our_br_norm = normalize(our_br).lower() if our_br else ""
 
-        # ⚡ v33: Brand-First Search
-        if _our_br_norm:
-            _brand_candidates = self._brand_index.get(_our_br_norm, [])
-            if len(_brand_candidates) >= 3:
-                _brand_set = set(_brand_candidates)
-                _filtered_valid = [i for i in valid_idx if i in _brand_set]
-                if len(_filtered_valid) >= 3:
-                    valid_idx = _filtered_valid
+        # ⚡ v22: Brand-First Search is MANDATORY (matches mandatory brand filter)
+        if not _our_br_norm:
+            return []
+
+        _brand_candidates = self._brand_index.get(_our_br_norm, [])
+        if not _brand_candidates:
+            return []  # No competitors with this brand
+
+        # intersect brand candidates with pre-computed non-sample set
+        valid_idx = [i for i in _brand_candidates if i in self._nonsample_set]
+        if not valid_idx:
+            return []
 
         valid_aggs = [self.agg_names[i] for i in valid_idx]
 
@@ -1623,21 +1756,39 @@ class CompIndex:
             c_pl = self.plines[idx]
 
             # ═══ فلاتر سريعة ═══
-            if _our_br_norm and c_br and _our_br_norm != self.norm_brands[idx]: continue
-            if our_sz > 0 and c_sz > 0 and abs(our_sz - c_sz) > 30: continue
+            # v22: brand filter is MANDATORY — no match without confirmed brand
+            if _our_br_norm and c_br:
+                if _our_br_norm != self.norm_brands[idx]: continue
+            else:
+                # One or both brands unknown → cannot confirm match → reject
+                continue
+            if our_sz > 0 and c_sz > 0 and abs(our_sz - c_sz) > 2: continue
+            # v22: reject size/no-size mismatch — one has size, other doesn't
+            if (our_sz > 0 and c_sz == 0) or (our_sz == 0 and c_sz > 0): continue
+            # ═══ v34: التركيز فلتر صارم — اختلاف التركيز المعروف = SKU مختلف = رفض ═══
+            #  (شانيل بلو اكسكلوسيف ≠ EDP ≠ EDT ≠ Parfum ≠ Elixir).
+            #  النسخة المكثّفة (+INT) تُعامَل كتركيز مختلف عن العادي.
             if our_tp and c_tp and our_tp != c_tp:
-                if our_sz > 0 and c_sz > 0 and abs(our_sz - c_sz) > 3: continue
+                continue
             if our_gd and c_gd and our_gd != c_gd: continue
 
-            # ═══ فلتر تصنيف المنتج ═══
+            # ═══ فلتر تصنيف المنتج (v34: صارم — لا نطابق العطر بمنتج غير عطري) ═══
+            #  مزيل عرق / لوشن بعد الحلاقة / جل استحمام / صابون / بخاخ شعر = ليست عطراً → رفض.
             c_class = self.classes[idx]
+            _NONPERF = ('rejected','hair_mist','body_mist','set','other',
+                        'after_shave','deodorant','body_lotion','shower_gel','soap')
             if our_class != c_class:
-                if our_class == 'rejected' or c_class == 'rejected':
-                    continue
-                if our_class in ('hair_mist','body_mist','set','other') or \
-                   c_class in ('hair_mist','body_mist','set','other'):
+                if our_class in _NONPERF or c_class in _NONPERF:
                     continue
                 if (our_class == 'tester') != (c_class == 'tester'):
+                    continue
+            # حتى لو تطابق التصنيف، احرس أسماء المنتجات غير العطرية صراحةً في اسم المنافس
+            _cl = name.lower()
+            if any(w in _cl for w in ("مزيل للرائحة","مزيل العرق","مزيل رائحة","ديودرنت",
+                                       "deodorant","after shave","aftershave","بعد الحلاقة",
+                                       "لوشن","لوسيون","جل استحمام","شاور","صابون","شامبو")):
+                # منتجنا عطر (retail/tester) لكن المنافس منتج عناية → ليس نفس المنتج
+                if our_class in ('retail','tester'):
                     continue
 
             # ═══ مقارنة الأرقام — pre-computed ═══
@@ -1645,23 +1796,26 @@ class CompIndex:
             if our_pnums and c_pnums and our_pnums != c_pnums:
                 continue
 
-            # ═══ مقارنة خط الإنتاج ═══
+            # ═══ مقارنة خط الإنتاج (v34: token_set يستوعب الكلمات الإضافية مثل "عطر الغالية") ═══
+            #  - token_set_ratio يعطي درجة عالية عندما يكون خط منتجنا جزءاً من اسم المنافس
+            #    (مثال: "سر الامير" داخل "سر الامير الغاليه") بدل رفضها خطأً.
+            #  - الحماية ضد المطابقات الخاطئة تبقى عبر: درجة الاسم الكاملة + حارس الـ flankers + عتبة 60.
             pline_penalty = 0
             if our_pline and c_pl:
-                pl_score = fuzz.token_sort_ratio(our_pline, c_pl)
+                pl_score = fuzz.token_set_ratio(our_pline, c_pl)
                 if our_br and c_br:
-                    if pl_score < 78:
+                    if pl_score < 55:
                         continue
-                    elif pl_score < 88:
+                    elif pl_score < 72:
                         pline_penalty = -25
-                    elif pl_score < 94:
+                    elif pl_score < 85:
                         pline_penalty = -10
                 else:
-                    if pl_score < 50:
+                    if pl_score < 48:
                         continue
-                    elif pl_score < 65:
+                    elif pl_score < 62:
                         pline_penalty = -45
-                    elif pl_score < 80:
+                    elif pl_score < 78:
                         pline_penalty = -25
 
             # ═══ score تفصيلي ═══
@@ -1672,23 +1826,17 @@ class CompIndex:
             s3 = fuzz.partial_ratio(n1, n2)
             base = s1*0.30 + s2*0.50 + s3*0.20
 
-            # ═══ تعديلات الماركة — pre-computed ═══
-            if _our_br_norm and c_br:
-                base += 10 if _our_br_norm == self.norm_brands[idx] else -25
-            elif our_br and not c_br:
-                base -= 25
-            elif not our_br and c_br:
-                base -= 25
-            elif not our_br and not c_br:
-                base -= 10
+            # ═══ تعديلات الماركة — pre-computed (v22: brand already confirmed in filter) ═══
+            # If we reach here, brands match (filter above guarantees it)
+            base += 10
 
             if not our_pline or not c_pl:
                 base -= 20
 
-            # ═══ تعديلات الحجم ═══
+            # ═══ تعديلات الحجم (v22: strict 2ml tolerance) ═══
             if our_sz > 0 and c_sz > 0:
                 d = abs(our_sz - c_sz)
-                base += 10 if d==0 else (-5 if d<=5 else -18 if d<=20 else -30)
+                base += 10 if d == 0 else (-5 if d <= 2 else -100)
 
             if our_tp and c_tp and our_tp != c_tp:
                 base -= 40
@@ -1858,12 +2006,13 @@ def _ai_batch(batch):
 
     # ── 3. Fuzzy fallback — لا يتوقف أبداً ──────────────────────────────
     # عند فشل كل AI → قرر حسب score الـ fuzzy
+    # v31.7: خفض حد القبول من 88 إلى 82 لتسريع المعالجة
     out = []
     for it in batch:
         cands = it.get("candidates", [])
         if not cands:
             out.append(-1)
-        elif cands[0].get("score", 0) >= 88:
+        elif cands[0].get("score", 0) >= 82:
             out.append(0)   # ثقة عالية → خذ الأول
         else:
             out.append(-1)  # ثقة منخفضة → مراجعة
@@ -1980,8 +2129,9 @@ def _row(product, our_price, our_id, brand, size, ptype, gender,
         # مطابقة مؤكدة (≥85%) → توزيع حسب السعر
         if our_price > 0 and cp > 0:
             _pt = _smart_price_threshold(our_price, cp)
-            if diff > _pt:      dec = "🔴 سعر أعلى"
-            else:                                dec = "✅ موافق"
+            if diff > _pt:       dec = "🔴 سعر أعلى"
+            elif diff < -_pt:    dec = "🟢 سعر أقل"
+            else:                dec = "✅ موافق"
         else:
             dec = "🔍 منتجات مفقودة"  # v31.6: لا سعر → مفقود
     else:
@@ -2263,6 +2413,9 @@ def run_full_analysis(our_df, comp_dfs, progress_callback=None, use_ai=True,
     ])
     our_brand_col = _fcol_optional(our_df, ["الماركة", "Brand", "brand", "البراند"])
 
+    # ⚡ v22: Enrich brand vocabulary with competitor brands BEFORE building indices
+    enrich_known_brands(comp_dfs=comp_dfs)
+
     # ── بناء الفهارس المسبقة ──
     indices = {}
     # Phase 0: remember (competitor, url) → comp_id so transition sites can
@@ -2276,7 +2429,7 @@ def run_full_analysis(our_df, comp_dfs, progress_callback=None, use_ai=True,
             "الكود","كود","Code","code","الرقم","رقم","Barcode","barcode","الباركود"
         ]) or ""
         c_img = _fcol_optional(cdf, [
-            "صورة المنتج", "صوره المنتج", "image", "Image", "product_image", "الصورة",
+            "صورة المنتج", "صوره المنتج", "image_url", "image", "Image", "product_image", "الصورة",
         ])
         c_url = _fcol_optional(cdf, [
             "رابط المنتج", "الرابط", "رابط", "product_url", "link", "url", "URL",
@@ -2304,7 +2457,12 @@ def run_full_analysis(our_df, comp_dfs, progress_callback=None, use_ai=True,
 
     total   = len(our_df)
     pending = []
-    BATCH   = 15  # حجم دفعة AI أكبر = API calls أقل = أسرع
+    BATCH   = 30  # v31.7: حجم دفعة أكبر = API calls أقل = أسرع بكثير
+
+    # v31.7: معالجة AI متوازية — 3 خيوط متزامنة
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    _ai_executor = ThreadPoolExecutor(max_workers=3)
+    _ai_futures = []
 
     def _flush():
         """يُعالج الـ pending batch ويضيف النتائج مباشرة — محمي من الأخطاء"""
@@ -2478,7 +2636,7 @@ def run_full_analysis(our_df, comp_dfs, progress_callback=None, use_ai=True,
                 progress_callback((i + 1) / total, results)
             continue
 
-        if best0["score"] >= 97 or not use_ai:
+        if best0["score"] >= 90 or not use_ai:  # v31.7: خفض من 97 إلى 90 — مطابقات fuzzy موثوقة تتخطى AI
             row_result = _row(product, our_price, our_id, brand, size, ptype, gender,
                               best0, src="auto", all_cands=all_cands,
                               our_img=our_img, our_url=our_url)

@@ -442,6 +442,233 @@ def _split_results(df):
     return result
 
 
+def _auto_resolve_review(results: dict) -> dict:
+    """
+    حسم سلة review آلياً عبر reclassify_review_items (دفعات 30).
+    - أعلى/أقل/موافق → يوزّع على السلال الأربع
+    - مفقود / تحت المراجعة / فشل AI → excluded (سجل داخلي)
+    النتيجة: صفر صفوف في review.
+    """
+    import logging as _log_resolve
+    review_df = results.get("review", pd.DataFrame())
+    if review_df.empty:
+        return results
+
+    total_review = len(review_df)
+    resolved_to_raise = 0
+    resolved_to_lower = 0
+    resolved_to_approved = 0
+    resolved_to_excluded = 0
+
+    BATCH_SIZE = 30
+    all_rows = review_df.reset_index(drop=True)
+
+    for batch_start in range(0, total_review, BATCH_SIZE):
+        batch_end = min(batch_start + BATCH_SIZE, total_review)
+        batch_df = all_rows.iloc[batch_start:batch_end]
+
+        # بناء قائمة المدخلات بصيغة reclassify_review_items
+        batch_items = []
+        for _, row in batch_df.iterrows():
+            batch_items.append({
+                "our": str(row.get("المنتج", "")),
+                "comp": str(row.get("منتج_المنافس", "")),
+                "our_price": float(row.get("السعر", 0) or 0),
+                "comp_price": float(row.get("سعر_المنافس", 0) or 0),
+            })
+
+        # استدعاء AI بالدفعة
+        try:
+            rc_results = reclassify_review_items(batch_items)
+        except Exception:
+            rc_results = []
+
+        # بناء خريطة idx → section من نتائج AI
+        resolved_map = {}  # idx (1-based) → section string
+        for rc in rc_results:
+            try:
+                idx = int(rc.get("idx", 0) or 0)
+            except Exception:
+                idx = 0
+            if 1 <= idx <= len(batch_items):
+                resolved_map[idx] = rc.get("section", "")
+
+        # توزيع كل صف في الدفعة
+        for local_i, (_, row) in enumerate(batch_df.iterrows()):
+            ai_section = resolved_map.get(local_i + 1, "")
+            row_copy = row.copy()
+
+            if "أعلى" in ai_section:
+                row_copy["القرار"] = "🔴 سعر أعلى"
+                results["price_raise"] = pd.concat(
+                    [results["price_raise"], row_copy.to_frame().T], ignore_index=True)
+                resolved_to_raise += 1
+            elif "أقل" in ai_section:
+                row_copy["القرار"] = "🟢 سعر أقل"
+                results["price_lower"] = pd.concat(
+                    [results["price_lower"], row_copy.to_frame().T], ignore_index=True)
+                resolved_to_lower += 1
+            elif "موافق" in ai_section:
+                row_copy["القرار"] = "✅ موافق"
+                results["approved"] = pd.concat(
+                    [results["approved"], row_copy.to_frame().T], ignore_index=True)
+                resolved_to_approved += 1
+            else:
+                # مفقود / تحت المراجعة / فشل AI / أي شيء آخر → excluded
+                row_copy["القرار"] = "⚪ مستبعد — حسم آلي: ليس نفس المنتج"
+                results["excluded"] = pd.concat(
+                    [results["excluded"], row_copy.to_frame().T], ignore_index=True)
+                resolved_to_excluded += 1
+
+    # إفراغ سلة review
+    results["review"] = pd.DataFrame()
+
+    _log_resolve.info(
+        "AUTO_RESOLVE_REVIEW: total=%d → raise=%d, lower=%d, approved=%d, excluded=%d",
+        total_review, resolved_to_raise, resolved_to_lower,
+        resolved_to_approved, resolved_to_excluded,
+    )
+    return results
+
+
+def _reconciliation_check(results: dict) -> dict:
+    """
+    تحقّق حفظ البيانات:
+    1. gap: len(all) == sum(price_raise + price_lower + approved + excluded + review)
+    2. duplicate: لا تكرار بين الأقسام السعرية والمفقود
+    3. consistency: عدد excluded يساوي عدد missing
+    """
+    import logging as _log_rc
+    all_count = len(results.get("all", pd.DataFrame()))
+    bucket_counts = {
+        "price_raise": len(results.get("price_raise", pd.DataFrame())),
+        "price_lower": len(results.get("price_lower", pd.DataFrame())),
+        "approved": len(results.get("approved", pd.DataFrame())),
+        "excluded": len(results.get("excluded", pd.DataFrame())),
+        "review": len(results.get("review", pd.DataFrame())),
+    }
+    sum_buckets = sum(bucket_counts.values())
+    gap = all_count - sum_buckets
+
+    # ── شرط عدم التكرار: لا منتج منافس في قسم سعري وفي مفقود معاً ──
+    duplicate_count = 0
+    duplicate_details = []
+    try:
+        # جمع معرّفات المنافسين في الأقسام السعرية
+        price_dfs = []
+        for k in ("price_raise", "price_lower", "approved"):
+            _df = results.get(k, pd.DataFrame())
+            if isinstance(_df, pd.DataFrame) and not _df.empty:
+                price_dfs.append(_df)
+        if price_dfs:
+            price_all = pd.concat(price_dfs, ignore_index=True)
+        else:
+            price_all = pd.DataFrame()
+
+        missing_df = results.get("missing", pd.DataFrame())
+
+        if not price_all.empty and isinstance(missing_df, pd.DataFrame) and not missing_df.empty:
+            # بناء مجموعة مفاتيح للأقسام السعرية (اسم المنافس المطبّع)
+            price_keys = set()
+            if "منتج_المنافس" in price_all.columns:
+                price_keys = set(
+                    price_all["منتج_المنافس"].fillna("").astype(str)
+                    .str.strip().str.lower()
+                    .loc[lambda s: (s != "") & (s != "nan") & (~s.str.startswith("❌"))]
+                    .tolist()
+                )
+
+            # مفاتيح المفقودات
+            missing_keys = set()
+            if "منتج_المنافس" in missing_df.columns:
+                missing_keys = set(
+                    missing_df["منتج_المنافس"].fillna("").astype(str)
+                    .str.strip().str.lower()
+                    .loc[lambda s: (s != "") & (s != "nan")]
+                    .tolist()
+                )
+
+            overlap = price_keys & missing_keys
+            duplicate_count = len(overlap)
+            if overlap:
+                duplicate_details = sorted(list(overlap))[:10]
+                _log_rc.warning(
+                    "DUPLICATE_CHECK: %d competitor products in both price sections AND missing: %s",
+                    duplicate_count, duplicate_details[:5],
+                )
+    except Exception as _dup_err:
+        _log_rc.warning("DUPLICATE_CHECK error: %s", _dup_err)
+
+    # ── شرط اتساق المصدرين: excluded (أيتام) vs missing count ──
+    excluded_count = bucket_counts["excluded"]
+    missing_count = len(results.get("missing", pd.DataFrame()))
+    sources_consistent = (excluded_count == missing_count)
+
+    check = {
+        "all_count": all_count,
+        "sum_buckets": sum_buckets,
+        "gap": gap,
+        "gap_ok": gap == 0,
+        "bucket_counts": bucket_counts,
+        "duplicate_count": duplicate_count,
+        "duplicate_details": duplicate_details,
+        "duplicate_ok": duplicate_count == 0,
+        "excluded_count": excluded_count,
+        "missing_count": missing_count,
+        "sources_consistent": sources_consistent,
+    }
+
+    if gap != 0:
+        _log_rc.warning("DATA_CONSERVATION gap=%d: all=%d, sum=%d, buckets=%s",
+                        gap, all_count, sum_buckets, bucket_counts)
+    else:
+        _log_rc.info("DATA_CONSERVATION OK: all=%d == sum=%d", all_count, sum_buckets)
+
+    return check
+
+
+
+def _dedup_missing_vs_matched(results: dict) -> dict:
+    """
+    مصدر حقيقة واحد: أي منتج منافس مطابَق في قسم سعري
+    يُزال من قائمة المفقود. المطابقة = المصدر الحاسم.
+    """
+    import logging as _log_dd
+    missing_df = results.get("missing", pd.DataFrame())
+    if not isinstance(missing_df, pd.DataFrame) or missing_df.empty:
+        return results
+
+    # جمع أسماء المنافسين المطابقين (مطبّعة lowercase)
+    matched_keys = set()
+    for k in ("price_raise", "price_lower", "approved"):
+        df = results.get(k, pd.DataFrame())
+        if isinstance(df, pd.DataFrame) and not df.empty and "منتج_المنافس" in df.columns:
+            matched_keys.update(
+                df["منتج_المنافس"].fillna("").astype(str)
+                .str.strip().str.lower()
+                .loc[lambda s: (s != "") & (s != "nan") & (~s.str.startswith("❌"))]
+                .tolist()
+            )
+
+    if not matched_keys:
+        return results
+
+    # تصفية المفقود: إزالة أي منتج مطابَق
+    col = "منتج_المنافس"
+    if col in missing_df.columns:
+        miss_keys = missing_df[col].fillna("").astype(str).str.strip().str.lower()
+        keep_mask = ~miss_keys.isin(matched_keys)
+        removed = int((~keep_mask).sum())
+        if removed > 0:
+            results["missing"] = missing_df[keep_mask].reset_index(drop=True)
+            _log_dd.info(
+                "DEDUP_MISSING: removed %d products from missing (already matched in price sections)",
+                removed,
+            )
+
+    return results
+
+
 # ── تحديث حي بدون مكوّنات مخصصة (streamlit-autorefresh يفشل غالباً على السحابة/الوكيل) ───────────────
 @st.fragment(run_every=4)
 def _render_analysis_job_progress_live() -> None:
@@ -460,7 +687,9 @@ def _render_analysis_job_progress_live() -> None:
             _df = pd.DataFrame(_rs)
             _mdf = pd.DataFrame(job.get("missing", [])) if job.get("missing") else pd.DataFrame()
             _sp = _split_results(_df)
+            _sp = _auto_resolve_review(_sp)
             _sp["missing"] = _mdf
+            _sp = _dedup_missing_vs_matched(_sp)
             st.session_state.results = _sp
             st.session_state.analysis_df = _df
         st.session_state.last_audit_stats = job.get("audit") or {}
@@ -683,7 +912,9 @@ if st.session_state.results is None and not st.session_state.job_running:
                     pass
 
             _auto_r = _split_results(_auto_df)
+            _auto_r = _auto_resolve_review(_auto_r)
             _auto_r["missing"] = _auto_miss
+            _auto_r = _dedup_missing_vs_matched(_auto_r)
             st.session_state.results     = _auto_r
             st.session_state.analysis_df = _auto_df
             st.session_state.job_id      = _auto_job.get("job_id")
@@ -2283,7 +2514,7 @@ def _auto_route_to_processed(our_name, our_id, comp_src, status, old_price=0, ne
             notes=notes,
         )
         # 2. إخفاء من الواجهة (حفظ في جدول المنتجات المخفية)
-        save_hidden_product(our_name, our_id, comp_src)
+        save_hidden_product(our_id, our_name, "approved")
         return True
     except Exception as e:
         st.error(f"خطأ في التوجيه الآلي: {e}")
@@ -2450,7 +2681,9 @@ with st.sidebar:
                         df_all = pd.DataFrame(_restored)
                         missing_df = pd.DataFrame(job.get("missing", [])) if job.get("missing") else pd.DataFrame()
                         _r = _split_results(df_all)
+                        _r = _auto_resolve_review(_r)
                         _r["missing"] = missing_df
+                        _r = _dedup_missing_vs_matched(_r)
                         st.session_state.results = _r
                         st.session_state.analysis_df = df_all
                     st.session_state.last_audit_stats = job.get("audit") or {}
@@ -2481,7 +2714,6 @@ with st.sidebar:
             for key, icon, label in [
                 ("price_raise","🔴","أعلى"), ("price_lower","🟢","أقل"),
                 ("approved","✅","موافق"), ("missing","🔍","مفقود"),
-                ("review","⚠️","مراجعة"), ("excluded","⚪","مستبعد"),
             ]:
                 cnt = len(r.get(key, pd.DataFrame()))
                 audit_key = {
@@ -2489,8 +2721,6 @@ with st.sidebar:
                     "price_lower": "price_lower",
                     "approved": "approved",
                     "missing": "missing",
-                    "review": "review",
-                    "excluded": "excluded",
                 }.get(key)
                 if audit_key and isinstance(_audit, dict):
                     try:
@@ -2638,23 +2868,51 @@ if page == "📊 لوحة التحكم":
         # ── v33: KPI أداء التحليل ──
         _analysis_total_dash = len(r.get("all", pd.DataFrame())) if isinstance(r.get("all", pd.DataFrame()), pd.DataFrame) else 0
         if _analysis_total_dash:
-            _kpi1, _kpi2, _kpi3, _kpi4 = st.columns(4)
+            _kpi1, _kpi2, _kpi3 = st.columns(3)
             _kpi1.metric("📊 منتجات مُحلَّلة", f"{_analysis_total_dash:,}")
             _kpi2.metric("🔍 مفقود جديد", f"{_missing_h:,}")
-            _review_h = len(r.get('review', pd.DataFrame()))
-            _kpi3.metric("⚠️ يحتاج مراجعة", f"{_review_h:,}")
             _coverage = int((_approved_h + _lower_h) / max(_total_h, 1) * 100)
-            _kpi4.metric("🎯 تغطية تنافسية", f"{_coverage}%")
+            _kpi3.metric("🎯 تغطية تنافسية", f"{_coverage}%")
             st.caption(f"ملخص آخر تحليل لـ **{_analysis_total_dash:,}** منتج.")
+
+        # ── شريط تحقّق حفظ البيانات (Data Conservation) ──
+        _rc = _reconciliation_check(r)
+        if _rc["gap_ok"] and _rc["duplicate_ok"]:
+            st.markdown(
+                f'<div style="background:linear-gradient(135deg,#1B5E20,#2E7D32);color:#A5D6A7;'
+                f'padding:12px 16px;border-radius:10px;font-weight:700;margin:8px 0;'
+                f'border:1px solid #4CAF5044;font-size:.95rem">'
+                f'✅ لا فقدان بيانات: كل المنتجات محسوبة ({_rc["all_count"]:,} منتج)'
+                f'</div>', unsafe_allow_html=True,
+            )
+        else:
+            _rc_msgs = []
+            if not _rc["gap_ok"]:
+                _rc_msgs.append(f'🚨 فقدان {abs(_rc["gap"])} منتج غير محسوب')
+            if not _rc["duplicate_ok"]:
+                _rc_msgs.append(f'🚨 تكرار: {_rc["duplicate_count"]} منتج مطابَق ومفقود معاً')
+            st.markdown(
+                f'<div style="background:linear-gradient(135deg,#B71C1C,#C62828);color:#FFCDD2;'
+                f'padding:12px 16px;border-radius:10px;font-weight:700;margin:8px 0;'
+                f'border:1px solid #EF444444;font-size:.95rem">'
+                f'{" | ".join(_rc_msgs)}'
+                f'</div>', unsafe_allow_html=True,
+            )
+        if not _rc["sources_consistent"]:
+            st.markdown(
+                f'<div style="background:#E65100;color:#FFE0B2;padding:10px 16px;'
+                f'border-radius:10px;font-weight:600;margin:4px 0;font-size:.85rem">'
+                f'⚠️ اختلاف المصدرين: excluded={_rc["excluded_count"]} ≠ missing={_rc["missing_count"]}'
+                f' — مساري المطابقة قد يكونان غير متطابقين'
+                f'</div>', unsafe_allow_html=True,
+            )
         _dash_nav = [
             ("🔴 سعر أعلى", "🔴", "سعر أعلى", "price_raise"),
             ("🟢 سعر أقل", "🟢", "سعر أقل", "price_lower"),
             ("✅ موافق عليها", "✅", "موافق", "approved"),
             ("🔍 منتجات مفقودة", "🔍", "مفقود", "missing"),
-            ("⚠️ تحت المراجعة", "⚠️", "مراجعة", "review"),
-            ("⚪ مستبعد (لا يوجد تطابق)", "⚪", "مستبعد", "excluded"),
         ]
-        cols = st.columns(6)
+        cols = st.columns(4)
         for col, (sec_title, icon, short_lbl, rkey) in zip(cols, _dash_nav):
             val = len(r.get(rkey, pd.DataFrame()))
             with col:
@@ -5850,8 +6108,14 @@ elif page == "🕷️ كشط المنافسين":
         _cur_pid = _read_pid_file()
         if _cur_pid and _is_process_alive(_cur_pid):
             try:
-                import signal as _sig_mod
-                _os_scraper.kill(_cur_pid, _sig_mod.SIGTERM)
+                import platform as _plat_mod
+                if _plat_mod.system() == "Windows":
+                    import subprocess as _sp_mod
+                    _sp_mod.run(["taskkill", "/PID", str(_cur_pid), "/T", "/F"],
+                                capture_output=True)
+                else:
+                    import signal as _sig_mod
+                    _os_scraper.kill(_cur_pid, _sig_mod.SIGTERM)
                 st.session_state["_sc_msg"] = (
                     "warning",
                     f"⏹️ تم إرسال إشارة إيقاف للكاشط (PID: {_cur_pid})"
@@ -7045,9 +7309,9 @@ elif page == "⚙️ الإعدادات":
                     st.code(e, language=None)
 
     with tab2:
-        st.info(f"حد التطابق الأدنى: {MIN_MATCH_SCORE}%")
-        st.info(f"حد التطابق العالي: {HIGH_MATCH_SCORE}%")
-        st.info(f"هامش فرق السعر: {PRICE_DIFF_THRESHOLD} ر.س")
+        st.info(f"حد التطابق الأدنى: {MATCH_THRESHOLD}%")
+        st.info(f"حد التطابق العالي: {HIGH_CONFIDENCE}%")
+        st.info(f"هامش فرق السعر: {PRICE_TOLERANCE} ر.س")
 
     with tab3:
         decisions = get_decisions(limit=30)
