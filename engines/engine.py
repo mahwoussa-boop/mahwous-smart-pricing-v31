@@ -1623,7 +1623,12 @@ class CompIndex:
             c_pl = self.plines[idx]
 
             # ═══ فلاتر سريعة ═══
-            if _our_br_norm and c_br and _our_br_norm != self.norm_brands[idx]: continue
+            # v22: brand filter is MANDATORY — no match without confirmed brand
+            if _our_br_norm and c_br:
+                if _our_br_norm != self.norm_brands[idx]: continue
+            else:
+                # One or both brands unknown → cannot confirm match → reject
+                continue
             if our_sz > 0 and c_sz > 0 and abs(our_sz - c_sz) > 2: continue
             # v22: reject size/no-size mismatch — one has size, other doesn't
             if (our_sz > 0 and c_sz == 0) or (our_sz == 0 and c_sz > 0): continue
@@ -1674,15 +1679,9 @@ class CompIndex:
             s3 = fuzz.partial_ratio(n1, n2)
             base = s1*0.30 + s2*0.50 + s3*0.20
 
-            # ═══ تعديلات الماركة — pre-computed ═══
-            if _our_br_norm and c_br:
-                base += 10 if _our_br_norm == self.norm_brands[idx] else -25
-            elif our_br and not c_br:
-                base -= 25
-            elif not our_br and c_br:
-                base -= 25
-            elif not our_br and not c_br:
-                base -= 10
+            # ═══ تعديلات الماركة — pre-computed (v22: brand already confirmed in filter) ═══
+            # If we reach here, brands match (filter above guarantees it)
+            base += 10
 
             if not our_pline or not c_pl:
                 base -= 20
