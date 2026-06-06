@@ -1525,18 +1525,49 @@ class CompIndex:
             self.genders   = self.df["extracted_gender"].fillna("").astype(str).tolist()
             self.plines    = self.df["product_line"].fillna("").astype(str).tolist()
             self.classes   = self.df["extracted_class"].fillna("").astype(str).tolist()
-            # ملء القيم الفارغة فقط
+
+            # v22: استخدام عمود brand الأصلي (88% تغطية) قبل extracted_brand (44%)
+            _raw_brand_col = None
+            for _bc in ("brand", "الماركة"):
+                if _bc in self.df.columns:
+                    _raw_brand_col = _bc
+                    break
+            _raw_brands = (
+                self.df[_raw_brand_col].fillna("").astype(str).str.strip().tolist()
+                if _raw_brand_col else [""] * len(self.df)
+            )
+
+            # ملء القيم الفارغة: brand column → extracted_brand → extract_brand(name)
             for i, n in enumerate(self.raw_names):
                 if not self.brands[i]:
-                    self.brands[i] = extract_brand(n) or ""
+                    # Try raw brand column first (from store/scraper)
+                    if _raw_brands[i]:
+                        self.brands[i] = extract_brand(_raw_brands[i]) or _raw_brands[i]
+                    else:
+                        self.brands[i] = extract_brand(n) or ""
                 if not self.agg_names[i]:
                     self.agg_names[i] = normalize_name(n) or ""
                 if not self.classes[i]:
                     self.classes[i] = classify_product(n) or ""
         else:
             # لا يوجد استخراج مسبق — حساب كامل (ملفات مرفوعة يدوياً)
+            # v22: prefer brand/الماركة column if available
+            _raw_brand_col2 = None
+            for _bc2 in ("brand", "الماركة"):
+                if _bc2 in self.df.columns:
+                    _raw_brand_col2 = _bc2
+                    break
+            _raw_brands2 = (
+                self.df[_raw_brand_col2].fillna("").astype(str).str.strip().tolist()
+                if _raw_brand_col2 else [""] * len(self.df)
+            )
             self.agg_names  = [normalize_name(n) for n in self.raw_names]
-            self.brands     = [extract_brand(n) for n in self.raw_names]
+            self.brands     = []
+            for i, n in enumerate(self.raw_names):
+                br = extract_brand(n) or ""
+                if not br and _raw_brands2[i]:
+                    br = extract_brand(_raw_brands2[i]) or _raw_brands2[i]
+                self.brands.append(br)
             self.sizes      = [extract_size(n) for n in self.raw_names]
             self.types      = [extract_type(n) for n in self.raw_names]
             self.genders    = [extract_gender(n) for n in self.raw_names]
