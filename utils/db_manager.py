@@ -369,7 +369,7 @@ def log_event(page, event_type, details="", product_name="", action=""):
             (_ts(), page, event_type, details, product_name, action)
         )
         conn.commit(); conn.close()
-    except: pass
+    except Exception: pass
 
 
 # ─── قرارات ────────────────────────────────
@@ -386,7 +386,7 @@ def log_decision(product_name, old_status, new_status, reason="",
              competitor, old_status, new_status, reason)
         )
         conn.commit(); conn.close()
-    except: pass
+    except Exception: pass
 
 
 def get_decisions(product_name=None, status=None, limit=100):
@@ -408,7 +408,7 @@ def get_decisions(product_name=None, status=None, limit=100):
             ).fetchall()
         conn.close()
         return [dict(r) for r in rows]
-    except: return []
+    except Exception: return []
 
 
 # ─── تاريخ الأسعار (الميزة الذكية) ──────────
@@ -489,7 +489,7 @@ def get_price_history(product_name, competitor="", limit=30):
             ).fetchall()
         conn.close()
         return [dict(r) for r in rows]
-    except: return []
+    except Exception: return []
 
 
 def get_price_changes(days=7):
@@ -514,7 +514,7 @@ def get_price_changes(days=7):
         ).fetchall()
         conn.close()
         return [dict(r) for r in rows]
-    except: return []
+    except Exception: return []
 
 
 # ─── المعالجة الخلفية ──────────────────────
@@ -553,13 +553,13 @@ def get_job_progress(job_id):
         if row:
             d = dict(row)
             try: d["results"] = json.loads(d.get("results_json", "[]"))
-            except: d["results"] = []
+            except Exception: d["results"] = []
             try: d["missing"] = json.loads(d.get("missing_json", "[]"))
-            except: d["missing"] = []
+            except Exception: d["missing"] = []
             try: d["audit"] = json.loads(d.get("audit_json") or "{}")
-            except: d["audit"] = {}
+            except Exception: d["audit"] = {}
             return d
-    except: pass
+    except Exception: pass
     return None
 
 
@@ -628,13 +628,13 @@ def get_last_job():
         if row:
             d = dict(row)
             try: d["results"] = json.loads(d.get("results_json", "[]"))
-            except: d["results"] = []
+            except Exception: d["results"] = []
             try: d["missing"] = json.loads(d.get("missing_json", "[]"))
-            except: d["missing"] = []
+            except Exception: d["missing"] = []
             try: d["audit"] = json.loads(d.get("audit_json") or "{}")
-            except: d["audit"] = {}
+            except Exception: d["audit"] = {}
             return d
-    except: pass
+    except Exception: pass
     return None
 
 
@@ -649,7 +649,7 @@ def log_analysis(our_file, comp_file, total, matched, missing, summary=""):
             (_ts(), our_file, comp_file, total, matched, missing, summary)
         )
         conn.commit(); conn.close()
-    except: pass
+    except Exception: pass
 
 
 def get_analysis_history(limit=20):
@@ -660,7 +660,7 @@ def get_analysis_history(limit=20):
         ).fetchall()
         conn.close()
         return [dict(r) for r in rows]
-    except: return []
+    except Exception: return []
 
 
 def get_events(page=None, limit=50):
@@ -677,7 +677,7 @@ def get_events(page=None, limit=50):
             ).fetchall()
         conn.close()
         return [dict(r) for r in rows]
-    except: return []
+    except Exception: return []
 
 
 # ── دوال المنتجات المخفية الدائمة ──────────────────────
@@ -1482,7 +1482,7 @@ def migrate_db_v26():
     except Exception as e:
         _logger.error("Migration v26 error: %s", e)
         try: conn.close()
-        except: pass
+        except Exception: pass
 
 
 # ═══════════════════════════════════════════════════════════════

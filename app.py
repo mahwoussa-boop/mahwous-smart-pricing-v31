@@ -2514,7 +2514,7 @@ def _auto_route_to_processed(our_name, our_id, comp_src, status, old_price=0, ne
             notes=notes,
         )
         # 2. إخفاء من الواجهة (حفظ في جدول المنتجات المخفية)
-        save_hidden_product(our_name, our_id, comp_src)
+        save_hidden_product(our_id, our_name, "approved")
         return True
     except Exception as e:
         st.error(f"خطأ في التوجيه الآلي: {e}")
@@ -6108,8 +6108,14 @@ elif page == "🕷️ كشط المنافسين":
         _cur_pid = _read_pid_file()
         if _cur_pid and _is_process_alive(_cur_pid):
             try:
-                import signal as _sig_mod
-                _os_scraper.kill(_cur_pid, _sig_mod.SIGTERM)
+                import platform as _plat_mod
+                if _plat_mod.system() == "Windows":
+                    import subprocess as _sp_mod
+                    _sp_mod.run(["taskkill", "/PID", str(_cur_pid), "/T", "/F"],
+                                capture_output=True)
+                else:
+                    import signal as _sig_mod
+                    _os_scraper.kill(_cur_pid, _sig_mod.SIGTERM)
                 st.session_state["_sc_msg"] = (
                     "warning",
                     f"⏹️ تم إرسال إشارة إيقاف للكاشط (PID: {_cur_pid})"
@@ -7303,9 +7309,9 @@ elif page == "⚙️ الإعدادات":
                     st.code(e, language=None)
 
     with tab2:
-        st.info(f"حد التطابق الأدنى: {MIN_MATCH_SCORE}%")
-        st.info(f"حد التطابق العالي: {HIGH_MATCH_SCORE}%")
-        st.info(f"هامش فرق السعر: {PRICE_DIFF_THRESHOLD} ر.س")
+        st.info(f"حد التطابق الأدنى: {MATCH_THRESHOLD}%")
+        st.info(f"حد التطابق العالي: {HIGH_CONFIDENCE}%")
+        st.info(f"هامش فرق السعر: {PRICE_TOLERANCE} ر.س")
 
     with tab3:
         decisions = get_decisions(limit=30)

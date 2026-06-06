@@ -18,7 +18,7 @@ if not isinstance(sys.stdout, io.TextIOWrapper) or sys.stdout.encoding != 'utf-8
         pass
 
 
-import requests, re, json, time, logging, unicodedata, sqlite3, csv, os
+import requests, re, json, time, logging, unicodedata, sqlite3, csv, os, threading
 from datetime import datetime
 from typing import List, Dict, Optional, Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -91,6 +91,8 @@ class MahallyScraper:
             progress_callback: دالة إشعار التقدم بالشكل:
                 callback(store_name, current_page, total_pages, message)
         """
+        # ── قفل حماية seen_ids من سباق الخيوط ──
+        self._seen_lock = threading.Lock()
         # ── الجلسة ──
         self.session = requests.Session()
         self.session.headers.update(DEFAULT_HEADERS)
@@ -212,8 +214,13 @@ class MahallyScraper:
 
                     for h in hits:
                         pid = h.get("public_product_id", h.get("objectID", ""))
-                        if pid and pid not in seen_ids:
-                            seen_ids.add(pid)
+                        with self._seen_lock:
+                            if pid and pid not in seen_ids:
+                                seen_ids.add(pid)
+                                is_new = True
+                            else:
+                                is_new = False
+                        if is_new:
                             prod = self._parse_hit(h, store_name)
                             if prod:
                                 products.append(prod)

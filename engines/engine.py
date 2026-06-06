@@ -15,7 +15,7 @@ import re, io, json, os, hashlib, sqlite3, gc
 import functools as _functools
 from datetime import datetime
 import pandas as pd
-from utils.data_helpers import first_image_url_string, pid_from_row as _pid
+from utils.data_helpers import first_image_url_string
 from utils.data_paths import get_data_db_path
 from utils.helpers import favicon_url_for_site, fetch_og_image_url
 from rapidfuzz import fuzz, process as rf_process
@@ -1029,12 +1029,48 @@ def extract_brand(text):
     return ""
 
 def extract_type(text):
+    """
+    v34: استخراج تركيز العطر بدقة من النص الخام (عربي+إنجليزي) — قبل أن يشوّهه normalize.
+    يُرجع رمزاً موحّداً: PARFUM / EDP / EDT / EDC / ELIXIR / EXCLUSIF / FRAICHE  (+ '+INT' للنسخ المكثّفة)
+    قاعدة SKU: اختلاف التركيز = منتج مختلف. (شانيل بلو اكسكلوسيف ≠ EDP ≠ EDT)
+    """
     if not isinstance(text, str): return ""
-    n = normalize(text)
-    if "edp" in n or "extrait" in n: return "EDP"
-    if "edt" in n: return "EDT"
-    if "edc" in n: return "EDC"
-    return ""
+    t = text.lower()
+    # توحيد بسيط للهمزات/الياء دون تحويل لاتيني (نعمل على الخام)
+    t = (t.replace("أ", "ا").replace("إ", "ا").replace("آ", "ا")
+           .replace("ى", "ي").replace("ـ", ""))
+    base = ""
+    # ── الأكثر تخصصاً أولاً ──
+    if any(k in t for k in ("exclusif", "exclusive", "اكسكلوسيف", "اكسكلوزيف",
+                            "ليكسكلوسيف", "لكسكلوسيف", "الحصري", " حصري")):
+        base = "EXCLUSIF"
+    elif any(k in t for k in ("elixir", "اليكسير", "الاكسير", "اكسير", "إكسير")):
+        base = "ELIXIR"
+    elif any(k in t for k in ("extrait", "اكستريت", "اكستريه", "extract de parfum",
+                              "بيور بارفان", "بيور بارفيوم", "pure parfum", "le parfum",
+                              "خلاصة العطر", "اكستريت دو بارفان")):
+        base = "PARFUM"
+    elif any(k in t for k in ("eau de parfum", "edp", "e.d.p", "او دو بارفيوم", "او دو برفيوم",
+                              "او دي بارفيوم", "او دي برفيوم", "ادو بارفيوم", "أو دو بارفيوم",
+                              "او دو بارفان", "او دو برفان", "اي دي بارفيوم", "اي دي برفيوم",
+                              " بارفيوم", " برفيوم")):
+        base = "EDP"
+    elif any(k in t for k in ("eau de toilette", "edt", "e.d.t", "او دو تواليت", "او دي تواليت",
+                              "ادو تواليت", "او دو توالت", "اي دي تواليت", "اي دي تويليت",
+                              "او دو تويليت", "تويليت", "تويلت", " تواليت", " توالت")):
+        base = "EDT"
+    elif any(k in t for k in ("eau de cologne", "edc", "cologne", "كولونيا", "او دو كولونيا",
+                              "او دو كولون", "كولون")):
+        base = "EDC"
+    elif any(k in t for k in ("eau fraiche", "fraiche", "fraîche", "او فريش", "فريش", "اقوا")):
+        base = "FRAICHE"
+    elif "parfum" in t and "shop" not in t:
+        # "parfum" مجرّدة بالإنجليزية → غالباً eau de parfum
+        base = "EDP"
+    # ── معدِّل التكثيف (Intense) — نسخة مختلفة من نفس التركيز ──
+    if base and any(k in t for k in ("intense", "انتنس", "انتينس", " مكثف")):
+        base = base + "+INT"
+    return base
 
 def extract_gender(text):
     if not isinstance(text, str): return ""
@@ -1582,7 +1618,8 @@ class CompIndex:
             self.agg_names = self.df["agg_name"].fillna("").astype(str).tolist()
             self.brands    = self.df["extracted_brand"].fillna("").astype(str).tolist()
             self.sizes     = pd.to_numeric(self.df["extracted_size"], errors='coerce').fillna(0).tolist()
-            self.types     = self.df["extracted_type"].fillna("").astype(str).tolist()
+            # v34: التركيز يُعاد حسابه طازجاً دائماً (عمود extracted_type قديم بمنطق ضعيف)
+            self.types     = [extract_type(n) for n in self.raw_names]
             self.genders   = self.df["extracted_gender"].fillna("").astype(str).tolist()
             self.plines    = self.df["product_line"].fillna("").astype(str).tolist()
             self.classes   = self.df["extracted_class"].fillna("").astype(str).tolist()
@@ -1728,19 +1765,30 @@ class CompIndex:
             if our_sz > 0 and c_sz > 0 and abs(our_sz - c_sz) > 2: continue
             # v22: reject size/no-size mismatch — one has size, other doesn't
             if (our_sz > 0 and c_sz == 0) or (our_sz == 0 and c_sz > 0): continue
+            # ═══ v34: التركيز فلتر صارم — اختلاف التركيز المعروف = SKU مختلف = رفض ═══
+            #  (شانيل بلو اكسكلوسيف ≠ EDP ≠ EDT ≠ Parfum ≠ Elixir).
+            #  النسخة المكثّفة (+INT) تُعامَل كتركيز مختلف عن العادي.
             if our_tp and c_tp and our_tp != c_tp:
-                if our_sz > 0 and c_sz > 0 and abs(our_sz - c_sz) > 3: continue
+                continue
             if our_gd and c_gd and our_gd != c_gd: continue
 
-            # ═══ فلتر تصنيف المنتج ═══
+            # ═══ فلتر تصنيف المنتج (v34: صارم — لا نطابق العطر بمنتج غير عطري) ═══
+            #  مزيل عرق / لوشن بعد الحلاقة / جل استحمام / صابون / بخاخ شعر = ليست عطراً → رفض.
             c_class = self.classes[idx]
+            _NONPERF = ('rejected','hair_mist','body_mist','set','other',
+                        'after_shave','deodorant','body_lotion','shower_gel','soap')
             if our_class != c_class:
-                if our_class == 'rejected' or c_class == 'rejected':
-                    continue
-                if our_class in ('hair_mist','body_mist','set','other') or \
-                   c_class in ('hair_mist','body_mist','set','other'):
+                if our_class in _NONPERF or c_class in _NONPERF:
                     continue
                 if (our_class == 'tester') != (c_class == 'tester'):
+                    continue
+            # حتى لو تطابق التصنيف، احرس أسماء المنتجات غير العطرية صراحةً في اسم المنافس
+            _cl = name.lower()
+            if any(w in _cl for w in ("مزيل للرائحة","مزيل العرق","مزيل رائحة","ديودرنت",
+                                       "deodorant","after shave","aftershave","بعد الحلاقة",
+                                       "لوشن","لوسيون","جل استحمام","شاور","صابون","شامبو")):
+                # منتجنا عطر (retail/tester) لكن المنافس منتج عناية → ليس نفس المنتج
+                if our_class in ('retail','tester'):
                     continue
 
             # ═══ مقارنة الأرقام — pre-computed ═══
@@ -1748,23 +1796,26 @@ class CompIndex:
             if our_pnums and c_pnums and our_pnums != c_pnums:
                 continue
 
-            # ═══ مقارنة خط الإنتاج ═══
+            # ═══ مقارنة خط الإنتاج (v34: token_set يستوعب الكلمات الإضافية مثل "عطر الغالية") ═══
+            #  - token_set_ratio يعطي درجة عالية عندما يكون خط منتجنا جزءاً من اسم المنافس
+            #    (مثال: "سر الامير" داخل "سر الامير الغاليه") بدل رفضها خطأً.
+            #  - الحماية ضد المطابقات الخاطئة تبقى عبر: درجة الاسم الكاملة + حارس الـ flankers + عتبة 60.
             pline_penalty = 0
             if our_pline and c_pl:
-                pl_score = fuzz.token_sort_ratio(our_pline, c_pl)
+                pl_score = fuzz.token_set_ratio(our_pline, c_pl)
                 if our_br and c_br:
-                    if pl_score < 78:
+                    if pl_score < 55:
                         continue
-                    elif pl_score < 88:
+                    elif pl_score < 72:
                         pline_penalty = -25
-                    elif pl_score < 94:
+                    elif pl_score < 85:
                         pline_penalty = -10
                 else:
-                    if pl_score < 50:
+                    if pl_score < 48:
                         continue
-                    elif pl_score < 65:
+                    elif pl_score < 62:
                         pline_penalty = -45
-                    elif pl_score < 80:
+                    elif pl_score < 78:
                         pline_penalty = -25
 
             # ═══ score تفصيلي ═══
@@ -2078,8 +2129,9 @@ def _row(product, our_price, our_id, brand, size, ptype, gender,
         # مطابقة مؤكدة (≥85%) → توزيع حسب السعر
         if our_price > 0 and cp > 0:
             _pt = _smart_price_threshold(our_price, cp)
-            if diff > _pt:      dec = "🔴 سعر أعلى"
-            else:                                dec = "✅ موافق"
+            if diff > _pt:       dec = "🔴 سعر أعلى"
+            elif diff < -_pt:    dec = "🟢 سعر أقل"
+            else:                dec = "✅ موافق"
         else:
             dec = "🔍 منتجات مفقودة"  # v31.6: لا سعر → مفقود
     else:
