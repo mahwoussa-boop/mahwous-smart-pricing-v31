@@ -28,7 +28,7 @@ def extract_price(html):
                 if p > 0:
                     img = d.get("image","")
                     return {"price": p, "name": d.get("name",""), "image": img[0] if isinstance(img,list) else str(img)}
-        except: pass
+        except Exception: pass
     # Meta
     m = re.search(r'<meta[^>]*property="product:price:amount"[^>]*content="([^"]+)"', html, re.I)
     if m:
@@ -38,7 +38,7 @@ def extract_price(html):
                 t = re.search(r'<meta[^>]*property="og:title"[^>]*content="([^"]+)"', html)
                 i = re.search(r'<meta[^>]*property="og:image"[^>]*content="([^"]+)"', html)
                 return {"price": p, "name": t.group(1) if t else "", "image": i.group(1) if i else ""}
-        except: pass
+        except Exception: pass
     # Regex
     for pm in re.findall(r'"price"\s*:\s*(\d+(?:\.\d+)?)', html):
         try:
@@ -47,7 +47,7 @@ def extract_price(html):
                 t = re.search(r'<meta[^>]*property="og:title"[^>]*content="([^"]+)"', html)
                 i = re.search(r'<meta[^>]*property="og:image"[^>]*content="([^"]+)"', html)
                 return {"price": p, "name": t.group(1) if t else "", "image": i.group(1) if i else ""}
-        except: pass
+        except Exception: pass
     return None
 
 
@@ -71,12 +71,12 @@ async def get_sitemap_urls(session, sitemap_url):
                             for u in s2.find_all("url"):
                                 l = u.find("loc")
                                 if l: urls.append(l.text.strip())
-                except: pass
+                except Exception: pass
         else:
             for u in soup.find_all("url"):
                 l = u.find("loc")
                 if l: urls.append(l.text.strip())
-    except: pass
+    except Exception: pass
     # Filter product URLs
     product_urls = [u for u in urls if re.search(r"/products?/|/p/", u, re.I)]
     return list(dict.fromkeys(product_urls))[:8000] if product_urls else list(dict.fromkeys(urls))[:8000]
@@ -94,7 +94,7 @@ async def scrape_one(session, url, sem):
             if result:
                 result["url"] = url
             return result
-        except: return None
+        except Exception: return None
 
 
 async def scrape_store(session, name, sitemap_url, existing_count):
@@ -123,7 +123,7 @@ async def scrape_store(session, name, sitemap_url, existing_count):
             try:
                 r = upsert_competitor_products(name, buffer, name_key="name", price_key="price")
                 total_prices += r.get("inserted",0) + r.get("updated",0)
-            except: pass
+            except Exception: pass
             buffer = []
 
         done = min(chunk_start+200, len(urls))
@@ -135,7 +135,7 @@ async def scrape_store(session, name, sitemap_url, existing_count):
         try:
             r = upsert_competitor_products(name, buffer, name_key="name", price_key="price")
             total_prices += r.get("inserted",0) + r.get("updated",0)
-        except: pass
+        except Exception: pass
 
     print(f"  [{name}] DONE: {total_prices} stored (was {existing_count})")
     return total_prices

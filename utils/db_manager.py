@@ -1353,15 +1353,17 @@ def bulk_revert_processed(product_keys: list) -> int:
             conn.execute("PRAGMA journal_mode=WAL;")
             conn.execute("PRAGMA busy_timeout=30000;")
             placeholders = ",".join("?" for _ in product_keys)
-            conn.execute(
+            cur1 = conn.execute(
                 f"DELETE FROM processed_products WHERE product_key IN ({placeholders})",
                 product_keys,
             )
-            conn.execute(
+            count1 = cur1.rowcount
+            cur2 = conn.execute(
                 f"DELETE FROM hidden_products WHERE product_key IN ({placeholders})",
                 product_keys,
             )
-            deleted = conn.execute("SELECT changes()").fetchone()[0]
+            count2 = cur2.rowcount
+            deleted = count1 + count2
             conn.commit()
         return deleted
     except Exception:

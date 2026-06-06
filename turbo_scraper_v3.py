@@ -50,7 +50,7 @@ def extract_price_from_html(html, url=""):
                         result["image_url"] = img[0] if isinstance(img, list) else str(img)
                         result["success"] = True
                         return result
-        except:
+        except Exception:
             pass
 
     # 2) Meta tags (og:price / product:price)
@@ -66,7 +66,7 @@ def extract_price_from_html(html, url=""):
                 result["image_url"] = og_image.group(1) if og_image else ""
                 result["success"] = True
                 return result
-        except:
+        except Exception:
             pass
 
     # 3) Salla/Zid specific: window.__INITIAL_STATE__ or twilight.product
@@ -82,7 +82,7 @@ def extract_price_from_html(html, url=""):
                 result["image_url"] = og_image.group(1) if og_image else ""
                 result["success"] = True
                 return result
-        except:
+        except Exception:
             pass
 
     # 4) HTML price class patterns (Arab stores)
@@ -107,7 +107,7 @@ def extract_price_from_html(html, url=""):
                         result["image_url"] = og_img["content"] if og_img else ""
                         result["success"] = True
                         return result
-                except:
+                except Exception:
                     pass
 
     # 5) Title extraction even without price
@@ -125,13 +125,13 @@ async def fetch_sitemap_urls(session, sitemap_url, store_name):
                                    timeout=aiohttp.ClientTimeout(total=20)) as resp:
                 if resp.status == 200:
                     return await resp.text(errors="ignore")
-        except:
+        except Exception:
             pass
         # Fallback
         try:
             from scrapers.anti_ban import try_curl_cffi
             return try_curl_cffi(url, timeout=15)
-        except:
+        except Exception:
             pass
         return None
 
@@ -181,7 +181,7 @@ async def fetch_sitemap_urls(session, sitemap_url, store_name):
                                 urls.append(p["url"])
                             elif p.get("id"):
                                 urls.append(f"{base}/products/{p['id']}")
-            except:
+            except Exception:
                 pass
 
     return list(dict.fromkeys(urls))[:8000]
@@ -206,7 +206,7 @@ async def scrape_store(session, store_name, urls, sem):
                         stats["errors"] += 1
                         continue
                     html = await resp.text(errors="ignore")
-            except:
+            except Exception:
                 stats["errors"] += 1
                 continue
 
@@ -225,7 +225,7 @@ async def scrape_store(session, store_name, urls, sem):
             try:
                 r = upsert_competitor_products(store_name, buffer, name_key="name", price_key="price")
                 stats["stored"] += r.get("inserted", 0) + r.get("updated", 0)
-            except:
+            except Exception:
                 pass
             buffer = []
 
@@ -238,7 +238,7 @@ async def scrape_store(session, store_name, urls, sem):
         try:
             r = upsert_competitor_products(store_name, buffer, name_key="name", price_key="price")
             stats["stored"] += r.get("inserted", 0) + r.get("updated", 0)
-        except:
+        except Exception:
             pass
 
     rate = stats["prices"] * 100 // max(stats["total"], 1)
@@ -304,7 +304,7 @@ async def main():
                                         all_stores[c["name"]] = page_urls
                                         print(f"  {c['name']}: {len(page_urls)} from {path}")
                                         break
-                        except:
+                        except Exception:
                             pass
 
         total_urls = sum(len(u) for u in all_stores.values())

@@ -11,7 +11,7 @@ engines/engine.py  v26.0 — محرك المطابقة الفائق السرعة
   3. أفضل 5 مرشحين → Gemini فقط إذا score بين 62-96%
   4. score ≥97% → تلقائي فوري  |  score <62% → مفقود
 """
-import re, io, json, os, hashlib, sqlite3, gc
+import re, io, json, os, hashlib, sqlite3, gc, threading
 import functools as _functools
 from datetime import datetime
 import pandas as pd
@@ -191,7 +191,7 @@ _SYN = {
     "كلوب دي نوي":"club de nuit","كلوب دنوي":"club de nuit",
     "مايلستون":"milestone",
     "سكاندل":"scandal","سكاندال":"scandal",
-    " مل":" ml","ملي ":"ml ","ملي":"ml","مل":"ml",
+    " مل":" ml","ملي ":"ml ","ملي":"ml",
     "ليتر":"l","لتر":"l"," لتر":" l"," ليتر":" l",
     "جم":"g","جرام":"g"," غرام":" g",
     # ── توحيد الحروف العربية ──
@@ -389,22 +389,24 @@ def _fuzzy_correct_brand(text: str, threshold: int = 82) -> str:
 # ✅ إصلاح #6: اتصال دائم بدلاً من فتح/إغلاق لكل عملية
 _DB = get_data_db_path("match_cache_v22.db")
 _db_conn = None
+_db_lock = threading.Lock()
 
 
 def _get_db_conn():
     """يُعيد اتصالاً دائماً — يُنشئه عند أول استدعاء فقط"""
     global _db_conn
-    if _db_conn is None:
-        try:
-            _db_conn = sqlite3.connect(_DB, check_same_thread=False)
-            _db_conn.execute(
-                "CREATE TABLE IF NOT EXISTS cache(h TEXT PRIMARY KEY, v TEXT, ts TEXT)"
-            )
-            _db_conn.execute("PRAGMA journal_mode=WAL")
-            _db_conn.commit()
-        except Exception:
-            _db_conn = None
-    return _db_conn
+    with _db_lock:
+        if _db_conn is None:
+            try:
+                _db_conn = sqlite3.connect(_DB, check_same_thread=False)
+                _db_conn.execute(
+                    "CREATE TABLE IF NOT EXISTS cache(h TEXT PRIMARY KEY, v TEXT, ts TEXT)"
+                )
+                _db_conn.execute("PRAGMA journal_mode=WAL")
+                _db_conn.commit()
+            except Exception:
+                _db_conn = None
+        return _db_conn
 
 
 def _init_db():
@@ -419,7 +421,8 @@ def _cget(k):
         conn = _get_db_conn()
         if conn is None:
             return None
-        r = conn.execute("SELECT v FROM cache WHERE h=?", (k,)).fetchone()
+        with _db_lock:
+            r = conn.execute("SELECT v FROM cache WHERE h=?", (k,)).fetchone()
         return json.loads(r[0]) if r else None
     except Exception:
         return None
@@ -430,11 +433,12 @@ def _cset(k, v):
         conn = _get_db_conn()
         if conn is None:
             return
-        conn.execute(
-            "INSERT OR REPLACE INTO cache VALUES(?,?,?)",
-            (k, json.dumps(v, ensure_ascii=False), datetime.now().isoformat())
-        )
-        conn.commit()
+        with _db_lock:
+            conn.execute(
+                "INSERT OR REPLACE INTO cache VALUES(?,?,?)",
+                (k, json.dumps(v, ensure_ascii=False), datetime.now().isoformat())
+            )
+            conn.commit()
     except Exception:
         pass
 
@@ -996,7 +1000,7 @@ def extract_size(text):
     if not isinstance(text, str): return 0.0
     tl = text.lower()
     # البحث عن oz أولاً وتحويله لـ ml
-    oz = re.findall(r'(\d+(?:\.\d+)?)\s*(?:oz|ounce)', tl)
+    oz = re.findall(r'(\d+(?:\.\d+)?)\s*(?:fl\.?\s*oz|oz|ounce|fluid\s*oz)', tl)
     if oz:
         return float(oz[0]) * 29.5735  # 1 oz = 29.5735 ml
     # البحث عن ml
@@ -1076,8 +1080,8 @@ def extract_gender(text):
     if not isinstance(text, str): return ""
     tl = text.lower()
     # تم التحديث ليشمل mans وصيغ الرجال المطلوبة
-    m = any(k in tl for k in ["pour homme","for men"," men "," men"," man ","رجالي","للرجال"," مان "," هوم ","homme"," uomo", "mans", "for mans", " mans "])
-    w = any(k in tl for k in ["pour femme","for women","women"," woman ","نسائي","للنساء","النسائي","lady","femme"," donna"])
+    m = any(k in tl for k in ["pour homme","for men","for him"," men "," men"," man ","رجالي","للرجال"," مان "," هوم ","homme"," uomo", "mans", "for mans", " mans "])
+    w = any(k in tl for k in ["pour femme","for women","for her","women"," woman ","نسائي","للنساء","النسائي","lady","femme"," donna"])
     if m and not w: return "رجالي"
     if w and not m: return "نسائي"
     return ""
@@ -1581,6 +1585,10 @@ _FLANKER_WORDS = [
     'sport', 'سبورت', 'intense', 'انتنس', 'إنتنس', 'elixir', 'الكسير', 'إلكسير',
     'oud', 'عود', 'absolu', 'ابسولو', 'leather', 'ليذر', 'black', 'بلاك',
     'extreme', 'اكستريم', 'poudree', 'بودريه',
+    # v34: كلمات flanker جديدة
+    'flame', 'فليم', 'night', 'نايت', 'gold', 'جولد', 'aqua', 'أكوا',
+    'nuit', 'نوي', 'blanc', 'بلانك', 'prive', 'privé', 'بريفيه',
+    'legend', 'ليجند', 'royal', 'رويال', 'wild', 'وايلد',
 ]
 _FLANKER_RES = []
 for _fw in _FLANKER_WORDS:
@@ -2111,6 +2119,8 @@ def _row(product, our_price, our_id, brand, size, ptype, gender,
 
     # v31.6: حد سعري ديناميكي
     def _smart_price_threshold(p1, p2):
+        if p1 <= 0 or p2 <= 0:
+            return PRICE_TOLERANCE if PRICE_TOLERANCE else 10
         avg = (p1 + p2) / 2
         if avg >= 300:  return avg * 0.05
         elif avg >= 100: return PRICE_TOLERANCE if PRICE_TOLERANCE else 10
@@ -2136,13 +2146,7 @@ def _row(product, our_price, our_id, brand, size, ptype, gender,
             dec = "🔍 منتجات مفقودة"  # v31.6: لا سعر → مفقود
     else:
         # 60% ≤ score < 85% → مطابقة محتملة → تحت المراجعة
-        if our_price > 0 and cp > 0:
-            _pt = _smart_price_threshold(our_price, cp)
-            if diff > _pt:      dec = "🔴 سعر أعلى"
-            elif diff < -_pt:   dec = "🟢 سعر أقل"
-            else:                dec = "✅ موافق"
-        else:
-            dec = "🔍 منتجات مفقودة"
+        dec = f"⚠️ تحت المراجعة ({score:.0f}%)"
 
     ai_lbl = {"gemini":f"🤖✅({score:.0f}%)",
               "auto":f"🎯({score:.0f}%)",
@@ -2461,8 +2465,6 @@ def run_full_analysis(our_df, comp_dfs, progress_callback=None, use_ai=True,
 
     # v31.7: معالجة AI متوازية — 3 خيوط متزامنة
     from concurrent.futures import ThreadPoolExecutor, as_completed
-    _ai_executor = ThreadPoolExecutor(max_workers=3)
-    _ai_futures = []
 
     def _flush():
         """يُعالج الـ pending batch ويضيف النتائج مباشرة — محمي من الأخطاء"""

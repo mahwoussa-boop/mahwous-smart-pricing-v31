@@ -33,8 +33,8 @@ HITS_PER_PAGE = 1000
 PAGE_DELAY = 0.3
 
 # ── Algolia API مباشرة (أسرع 100x وبدون حظر) ──────────────────────────
-ALGOLIA_APP_ID = "L41Y35UONW"
-ALGOLIA_API_KEY = "f60e98a284e4b402af626d0dd1fc6cbd"
+ALGOLIA_APP_ID = os.environ.get("ALGOLIA_APP_ID", "L41Y35UONW")
+ALGOLIA_API_KEY = os.environ.get("ALGOLIA_API_KEY", "f60e98a284e4b402af626d0dd1fc6cbd")
 ALGOLIA_API_URL = f"https://{ALGOLIA_APP_ID}-dsn.algolia.net/1/indexes/{ALGOLIA_INDEX}/query"
 ALGOLIA_HEADERS = {
     "X-Algolia-Application-Id": ALGOLIA_APP_ID,

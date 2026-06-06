@@ -193,7 +193,7 @@ async def scrape_price_fast(session, url, sem, store_stats):
                 price_str = str(ld_data.get("price", "0")).replace(",", "")
                 try:
                     price = float(price_str)
-                except:
+                except Exception:
                     price = 0
                 if price > 0:
                     result["price"] = price
@@ -218,7 +218,7 @@ async def scrape_price_fast(session, url, sem, store_stats):
                 result["success"] = True
                 store_stats["prices"] += 1
                 return result
-        except:
+        except Exception:
             pass
     
     # 3) Price regex in HTML
@@ -233,7 +233,7 @@ async def scrape_price_fast(session, url, sem, store_stats):
                 result["success"] = True
                 store_stats["prices"] += 1
                 return result
-        except:
+        except Exception:
             pass
     
     store_stats["no_price"] += 1

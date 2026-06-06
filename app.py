@@ -17,6 +17,7 @@ app.py - نظام التسعير الذكي مهووس v26.0
 ✅ فحص ذاتي عند الإقلاع (Health Check)
 """
 import os as _os_early
+import html as _html_mod
 _os_early.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 _os_early.environ.setdefault("MKL_NUM_THREADS", "1")
 _os_early.environ.setdefault("OMP_NUM_THREADS", "1")
@@ -403,11 +404,13 @@ def _split_results(df):
             return pd.Series([False] * len(work), index=work.index)
 
     # ── v33: Safety Net — أي منتج بقرار غير معروف يذهب لـ "مستبعد" بدل الضياع ──
-    price_raise = work[_contains("أعلى")]
-    price_lower = work[_contains("أقل")]
-    approved    = work[_contains("موافق")]
-    review      = work[_contains("مراجعة")]
-    excluded    = work[_contains("مستبعد")]
+    # v34: تصنيف حصري — كل منتج يذهب لقسم واحد فقط
+    _dec = work["القرار"].fillna("").str.strip()
+    price_raise = work[_dec.str.startswith("🔴")]
+    price_lower = work[_dec.str.startswith("🟢") | _dec.str.contains("سعر أقل", na=False, regex=False)]
+    approved    = work[_dec.str.startswith("✅")]
+    review      = work[_dec.str.startswith("⚠️") | _dec.str.startswith("🔍")]
+    excluded    = work[_dec.str.startswith("⚪")]
 
     # جمع كل المنتجات المُوزَّعة
     _distributed_idx = set()
@@ -522,6 +525,15 @@ def _auto_resolve_review(results: dict) -> dict:
 
     # إفراغ سلة review
     results["review"] = pd.DataFrame()
+
+    # تحديث all بعد إعادة التوزيع
+    results["all"] = pd.concat([
+        results.get("price_raise", pd.DataFrame()),
+        results.get("price_lower", pd.DataFrame()),
+        results.get("approved", pd.DataFrame()),
+        results.get("review", pd.DataFrame()),
+        results.get("excluded", pd.DataFrame()),
+    ], ignore_index=True)
 
     _log_resolve.info(
         "AUTO_RESOLVE_REVIEW: total=%d → raise=%d, lower=%d, approved=%d, excluded=%d",
@@ -923,7 +935,7 @@ if st.session_state.results is None and not st.session_state.job_running:
 # ── دوال مساعدة ───────────────────────────
 def db_log(page, action, details=""):
     try: log_event(page, action, details)
-    except: pass
+    except Exception: pass
 
 
 
@@ -1809,7 +1821,7 @@ def render_pro_table(df, prefix, section_type="update", show_search=True,
                     "comp_price": safe_float(r.get("سعر_المنافس", 0))
                 } for _, r in filtered.head(20).iterrows()]
                 res = bulk_verify(items, _section_map.get(prefix, "general"))
-                st.markdown(f'<div class="ai-box">{res["response"]}</div>',
+                st.markdown(f'<div class="ai-box">{_html_mod.escape(str(res["response"]))}</div>',
                             unsafe_allow_html=True)
     with ac4:
         if section_type == "excluded":
@@ -2025,7 +2037,7 @@ def render_pro_table(df, prefix, section_type="update", show_search=True,
         _pid_str = ""
         if _pid_raw and str(_pid_raw) not in ("", "nan", "None", "0"):
             try: _pid_str = str(int(float(str(_pid_raw))))
-            except: _pid_str = str(_pid_raw)
+            except Exception: _pid_str = str(_pid_raw)
 
         _our_img_v, _comp_img_v = row_media_urls_from_analysis(row)
         _comp_url_v = competitor_product_url_from_row(row)
@@ -3758,7 +3770,7 @@ elif page == "🔴 سعر أعلى":
                                    f"2. أي المنتجات يمكن إبقاؤها (فرق<10)؟\n"
                                    f"3. استراتيجية تسعير مخصصة لكل ماركة")
                         r = call_ai(_prompt, "price_raise")
-                        st.markdown(f'<div class="ai-box">{r["response"]}</div>', unsafe_allow_html=True)
+                        st.markdown(f'<div class="ai-box">{_html_mod.escape(str(r["response"]))}</div>', unsafe_allow_html=True)
             render_pro_table(df, "raise", "raise", compact_cards=True)
         else:
             st.success("✅ ممتاز! لا توجد منتجات بسعر أعلى")
@@ -3796,7 +3808,7 @@ elif page == "🟢 سعر أقل":
                                    f"2. أي المنتجات نرفعها تدريجياً (فرق 10-50)؟\n"
                                    f"3. كم الربح المتوقع إذا رفعنا الأسعار؟")
                         r = call_ai(_prompt, "price_lower")
-                        st.markdown(f'<div class="ai-box">{r["response"]}</div>', unsafe_allow_html=True)
+                        st.markdown(f'<div class="ai-box">{_html_mod.escape(str(r["response"]))}</div>', unsafe_allow_html=True)
             render_pro_table(df, "lower", "lower")
         else:
             st.info("لا توجد منتجات")
@@ -3919,7 +3931,7 @@ elif page == "🔍 منتجات مفقودة":
                         f"أجب على: {miss_query}"
                     )
                     _response = call_ai(_prompt, "missing")
-                    st.markdown(f'<div class="ai-box">{_response["response"]}</div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="ai-box">{_html_mod.escape(str(_response["response"]))}</div>', unsafe_allow_html=True)
 
     # ── 🧠 كشف ذكي من المخزن التراكمي (v31) ─────────────────────────────
     with st.expander("🧠 كشف ذكي من المخزن التراكمي (16+ متجر)", expanded=False):
@@ -4104,7 +4116,7 @@ elif page == "🔍 منتجات مفقودة":
                         import re as _re
                         resp = _re.sub(r'```json.*?```', '', resp, flags=_re.DOTALL)
                         resp = _re.sub(r'```.*?```', '', resp, flags=_re.DOTALL)
-                        st.markdown(f'<div class="ai-box">{resp}</div>', unsafe_allow_html=True)
+                        st.markdown(f'<div class="ai-box">{_html_mod.escape(str(resp))}</div>', unsafe_allow_html=True)
 
             # ── v33: فلاتر محسّنة ظاهرة ─────────────────────────────────
             opts = get_filter_options(df)
@@ -4983,7 +4995,7 @@ elif page == "🔍 منتجات مفقودة":
                 _miss_pid = ""
                 if _miss_pid_raw and str(_miss_pid_raw) not in ("", "nan", "None", "0", "NaN"):
                     try: _miss_pid = str(int(float(str(_miss_pid_raw))))
-                    except: _miss_pid = str(_miss_pid_raw).strip()
+                    except Exception: _miss_pid = str(_miss_pid_raw).strip()
                 variant_label   = str(row.get("نوع_متاح", ""))
                 variant_product = str(row.get("منتج_متاح", ""))
                 variant_score   = safe_float(row.get("نسبة_التشابه", 0))

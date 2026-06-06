@@ -205,7 +205,7 @@ def diagnose_ai_providers() -> dict:
                 results["openrouter"] = f"⚠️ 429 — تجاوز الحد — {od[:120] if od else ''}"
             else:
                 try: msg = r.json().get("error",{}).get("message","")
-                except: msg = r.text[:100]
+                except Exception: msg = r.text[:100]
                 od = _http_error_detail(r)
                 results["openrouter"] = f"❌ {r.status_code} — {(od or msg)[:120]}"
         except requests.exceptions.ConnectionError:
@@ -238,7 +238,7 @@ def diagnose_ai_providers() -> dict:
                 results["cohere"] = f"⚠️ 429 — تجاوز الحد — {d[:100] if d else ''}"
             else:
                 try: msg = r.json().get("message","")
-                except: msg = r.text[:100]
+                except Exception: msg = r.text[:100]
                 results["cohere"] = f"❌ {r.status_code} — {msg[:80]}"
         except requests.exceptions.ConnectionError:
             results["cohere"] = "❌ لا اتصال بـ api.cohere.com"
@@ -490,7 +490,7 @@ def _parse_json(txt):
         s = clean.find('{'); e = clean.rfind('}')+1
         if s >= 0 and e > s:
             return json.loads(clean[s:e])
-    except: pass
+    except Exception: pass
     return None
 
 def _search_ddg(query, num_results=5):
@@ -508,7 +508,7 @@ def _search_ddg(query, num_results=5):
                 if isinstance(rel, dict) and rel.get("Text"):
                     results.append({"snippet": rel.get("Text",""), "url": rel.get("FirstURL","")})
             return results
-    except: pass
+    except Exception: pass
     return []
 
 
@@ -618,7 +618,7 @@ def gemini_chat(message, history=None, system_extra=""):
             elif r.status_code == 429:
                 # ✅ إصلاح: لا sleep في main thread
                 continue
-        except: continue
+        except Exception: continue
     r = _call_openrouter(message, sys)
     if r: return {"success":True,"response":r,"source":"OpenRouter"}
     return {"success":False,"response":"فشل الاتصال","source":"none"}
