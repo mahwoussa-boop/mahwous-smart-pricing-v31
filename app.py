@@ -627,6 +627,48 @@ def _reconciliation_check(results: dict) -> dict:
     return check
 
 
+
+def _dedup_missing_vs_matched(results: dict) -> dict:
+    """
+    مصدر حقيقة واحد: أي منتج منافس مطابَق في قسم سعري
+    يُزال من قائمة المفقود. المطابقة = المصدر الحاسم.
+    """
+    import logging as _log_dd
+    missing_df = results.get("missing", pd.DataFrame())
+    if not isinstance(missing_df, pd.DataFrame) or missing_df.empty:
+        return results
+
+    # جمع أسماء المنافسين المطابقين (مطبّعة lowercase)
+    matched_keys = set()
+    for k in ("price_raise", "price_lower", "approved"):
+        df = results.get(k, pd.DataFrame())
+        if isinstance(df, pd.DataFrame) and not df.empty and "منتج_المنافس" in df.columns:
+            matched_keys.update(
+                df["منتج_المنافس"].fillna("").astype(str)
+                .str.strip().str.lower()
+                .loc[lambda s: (s != "") & (s != "nan") & (~s.str.startswith("❌"))]
+                .tolist()
+            )
+
+    if not matched_keys:
+        return results
+
+    # تصفية المفقود: إزالة أي منتج مطابَق
+    col = "منتج_المنافس"
+    if col in missing_df.columns:
+        miss_keys = missing_df[col].fillna("").astype(str).str.strip().str.lower()
+        keep_mask = ~miss_keys.isin(matched_keys)
+        removed = int((~keep_mask).sum())
+        if removed > 0:
+            results["missing"] = missing_df[keep_mask].reset_index(drop=True)
+            _log_dd.info(
+                "DEDUP_MISSING: removed %d products from missing (already matched in price sections)",
+                removed,
+            )
+
+    return results
+
+
 # ── تحديث حي بدون مكوّنات مخصصة (streamlit-autorefresh يفشل غالباً على السحابة/الوكيل) ───────────────
 @st.fragment(run_every=4)
 def _render_analysis_job_progress_live() -> None:
@@ -647,6 +689,7 @@ def _render_analysis_job_progress_live() -> None:
             _sp = _split_results(_df)
             _sp = _auto_resolve_review(_sp)
             _sp["missing"] = _mdf
+            _sp = _dedup_missing_vs_matched(_sp)
             st.session_state.results = _sp
             st.session_state.analysis_df = _df
         st.session_state.last_audit_stats = job.get("audit") or {}
@@ -871,6 +914,7 @@ if st.session_state.results is None and not st.session_state.job_running:
             _auto_r = _split_results(_auto_df)
             _auto_r = _auto_resolve_review(_auto_r)
             _auto_r["missing"] = _auto_miss
+            _auto_r = _dedup_missing_vs_matched(_auto_r)
             st.session_state.results     = _auto_r
             st.session_state.analysis_df = _auto_df
             st.session_state.job_id      = _auto_job.get("job_id")
@@ -2639,6 +2683,7 @@ with st.sidebar:
                         _r = _split_results(df_all)
                         _r = _auto_resolve_review(_r)
                         _r["missing"] = missing_df
+                        _r = _dedup_missing_vs_matched(_r)
                         st.session_state.results = _r
                         st.session_state.analysis_df = df_all
                     st.session_state.last_audit_stats = job.get("audit") or {}

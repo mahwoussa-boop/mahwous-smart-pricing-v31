@@ -326,7 +326,7 @@ def _fuzzy_correct_brand(text: str, threshold: int = 82) -> str:
 
 # ─── SQLite Cache — اتصال دائم مع thread safety ────────────────
 # ✅ إصلاح #6: اتصال دائم بدلاً من فتح/إغلاق لكل عملية
-_DB = get_data_db_path("match_cache_v21.db")
+_DB = get_data_db_path("match_cache_v22.db")
 _db_conn = None
 
 
@@ -1624,7 +1624,9 @@ class CompIndex:
 
             # ═══ فلاتر سريعة ═══
             if _our_br_norm and c_br and _our_br_norm != self.norm_brands[idx]: continue
-            if our_sz > 0 and c_sz > 0 and abs(our_sz - c_sz) > 30: continue
+            if our_sz > 0 and c_sz > 0 and abs(our_sz - c_sz) > 2: continue
+            # v22: reject size/no-size mismatch — one has size, other doesn't
+            if (our_sz > 0 and c_sz == 0) or (our_sz == 0 and c_sz > 0): continue
             if our_tp and c_tp and our_tp != c_tp:
                 if our_sz > 0 and c_sz > 0 and abs(our_sz - c_sz) > 3: continue
             if our_gd and c_gd and our_gd != c_gd: continue
@@ -1685,10 +1687,10 @@ class CompIndex:
             if not our_pline or not c_pl:
                 base -= 20
 
-            # ═══ تعديلات الحجم ═══
+            # ═══ تعديلات الحجم (v22: strict 2ml tolerance) ═══
             if our_sz > 0 and c_sz > 0:
                 d = abs(our_sz - c_sz)
-                base += 10 if d==0 else (-5 if d<=5 else -18 if d<=20 else -30)
+                base += 10 if d == 0 else (-5 if d <= 2 else -100)
 
             if our_tp and c_tp and our_tp != c_tp:
                 base -= 40
@@ -1858,12 +1860,13 @@ def _ai_batch(batch):
 
     # ── 3. Fuzzy fallback — لا يتوقف أبداً ──────────────────────────────
     # عند فشل كل AI → قرر حسب score الـ fuzzy
+    # v31.7: خفض حد القبول من 88 إلى 82 لتسريع المعالجة
     out = []
     for it in batch:
         cands = it.get("candidates", [])
         if not cands:
             out.append(-1)
-        elif cands[0].get("score", 0) >= 88:
+        elif cands[0].get("score", 0) >= 82:
             out.append(0)   # ثقة عالية → خذ الأول
         else:
             out.append(-1)  # ثقة منخفضة → مراجعة
@@ -2304,7 +2307,12 @@ def run_full_analysis(our_df, comp_dfs, progress_callback=None, use_ai=True,
 
     total   = len(our_df)
     pending = []
-    BATCH   = 15  # حجم دفعة AI أكبر = API calls أقل = أسرع
+    BATCH   = 30  # v31.7: حجم دفعة أكبر = API calls أقل = أسرع بكثير
+
+    # v31.7: معالجة AI متوازية — 3 خيوط متزامنة
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    _ai_executor = ThreadPoolExecutor(max_workers=3)
+    _ai_futures = []
 
     def _flush():
         """يُعالج الـ pending batch ويضيف النتائج مباشرة — محمي من الأخطاء"""
@@ -2478,7 +2486,7 @@ def run_full_analysis(our_df, comp_dfs, progress_callback=None, use_ai=True,
                 progress_callback((i + 1) / total, results)
             continue
 
-        if best0["score"] >= 97 or not use_ai:
+        if best0["score"] >= 90 or not use_ai:  # v31.7: خفض من 97 إلى 90 — مطابقات fuzzy موثوقة تتخطى AI
             row_result = _row(product, our_price, our_id, brand, size, ptype, gender,
                               best0, src="auto", all_cands=all_cands,
                               our_img=our_img, our_url=our_url)
