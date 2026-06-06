@@ -1677,7 +1677,13 @@ def init_competitor_store() -> None:
         ("product_line",    "TEXT DEFAULT ''"),
     ]
     existing = {r[1] for r in conn.execute("PRAGMA table_info(competitor_products_store)").fetchall()}
+    import re as _re
     for col_name, col_type in _new_cols:
+        # whitelist: اسم العمود معرّف صالح + النوع الأساسي ضمن المسموح
+        if not _re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", col_name):
+            continue
+        if col_type.split()[0].upper() not in {"TEXT", "INTEGER", "REAL", "BLOB", "NUMERIC"}:
+            continue
         if col_name not in existing:
             try:
                 conn.execute(f"ALTER TABLE competitor_products_store ADD COLUMN {col_name} {col_type}")

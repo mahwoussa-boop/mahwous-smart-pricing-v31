@@ -69,6 +69,9 @@ _SCRAPE_EXECUTOR = ThreadPoolExecutor(
     max_workers=_CONCURRENCY + 2,
     thread_name_prefix="scrape_worker",
 )
+# إغلاق نظيف للمجمّع عند خروج العملية — لمنع تعليق الخيوط
+import atexit as _atexit
+_atexit.register(lambda: _SCRAPE_EXECUTOR.shutdown(wait=False))
 
 
 def _write_progress(payload: dict) -> None:
