@@ -752,6 +752,9 @@ def try_httpx(
     headers.pop("Connection", None)
     headers.pop("Upgrade-Insecure-Requests", None)
     try:
+        # verify=False مقصود: الكشط لقراءة أسعار عامة فقط (لا بيانات حساسة/اعتماد)،
+        # وبعض متاجر المنافسين لديها سلاسل شهادات وسيطة ناقصة أو خلف CDN تكسر التحقق.
+        # المخاطرة محدودة لأننا لا نرسل أي بيانات سرية في هذه الطلبات.
         client_kwargs = dict(
             http2=True,
             follow_redirects=True,
@@ -803,6 +806,8 @@ def _try_googlebot_ua(
         "Cache-Control":   "no-cache",
     }
     try:
+        # verify=False مقصود: كشط أسعار عامة فقط بلا بيانات حساسة؛ بعض المتاجر
+        # لديها سلاسل شهادات ناقصة/خلف CDN تكسر التحقق. لا نرسل أي سرّ في الطلب.
         req_kwargs: dict = dict(
             headers=headers,
             timeout=timeout,
@@ -930,6 +935,8 @@ def try_all_sync_fallbacks(
             referer=f"https://{domain}/", domain=domain
         )
         session  = _get_req_session()
+        # verify=False مقصود: كشط أسعار عامة فقط بلا بيانات حساسة؛ بعض المتاجر
+        # لديها سلاسل شهادات ناقصة/خلف CDN تكسر التحقق. لا نرسل أي سرّ في الطلب.
         req_kwargs: dict = dict(
             headers=headers, timeout=timeout,
             allow_redirects=True, verify=False,

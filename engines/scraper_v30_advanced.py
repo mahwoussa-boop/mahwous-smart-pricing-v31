@@ -53,6 +53,9 @@ except ImportError:
 
 # Thread pool for sync fallbacks — avoids blocking the event loop
 _SYNC_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=16, thread_name_prefix="scrv30")
+# إغلاق نظيف للمجمّع عند خروج العملية — لمنع تعليق الخيوط
+import atexit as _atexit
+_atexit.register(lambda: _SYNC_EXECUTOR.shutdown(wait=False))
 
 # ── USD/non-SAR detection ────────────────────────────────────────────────────
 _USD_MARKERS = re.compile(r"\$|USD|usd|دولار|euro|EUR|eur|يورو|£|GBP", re.I)

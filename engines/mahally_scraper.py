@@ -373,6 +373,12 @@ class MahallyScraper:
             ("category", "TEXT DEFAULT ''"),
             ("sku", "TEXT DEFAULT ''"),
         ]:
+            # whitelist: اسم العمود معرّف صالح + النوع الأساسي ضمن المسموح
+            import re as _re
+            if not _re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", col_def[0]):
+                continue
+            if col_def[1].split()[0].upper() not in {"TEXT", "INTEGER", "REAL", "BLOB", "NUMERIC"}:
+                continue
             try:
                 cur.execute(f"ALTER TABLE competitor_products_store ADD COLUMN {col_def[0]} {col_def[1]}")
             except sqlite3.OperationalError:

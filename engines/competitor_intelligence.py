@@ -93,24 +93,32 @@ class CompetitorIntelligence:
             ("category", "TEXT DEFAULT ''"),
             ("sku", "TEXT DEFAULT ''"),
         ]
+        import re as _re
+        from contextlib import closing as _closing
+        _ALLOWED_TYPES = {"TEXT", "INTEGER", "REAL", "BLOB", "NUMERIC"}
         try:
-            conn = sqlite3.connect(self.db_path)
-            cur = conn.cursor()
-            # تأكد من وجود الجدول
-            cur.execute("""
-                SELECT name FROM sqlite_master 
-                WHERE type='table' AND name='competitor_products_store'
-            """)
-            if not cur.fetchone():
-                conn.close()
-                return
-            for col_name, col_type in cols:
-                try:
-                    cur.execute(f"ALTER TABLE competitor_products_store ADD COLUMN {col_name} {col_type}")
-                except sqlite3.OperationalError:
-                    pass
-            conn.commit()
-            conn.close()
+            # contextlib.closing: يضمن إغلاق الاتصال فعلياً حتى عند حدوث استثناء
+            # (ملاحظة: `with sqlite3.connect()` وحده يلتزم/يتراجع لكنه لا يُغلق الاتصال)
+            with _closing(sqlite3.connect(self.db_path)) as conn:
+                cur = conn.cursor()
+                # تأكد من وجود الجدول
+                cur.execute("""
+                    SELECT name FROM sqlite_master
+                    WHERE type='table' AND name='competitor_products_store'
+                """)
+                if not cur.fetchone():
+                    return
+                for col_name, col_type in cols:
+                    # whitelist: اسم العمود معرّف صالح + النوع الأساسي ضمن القائمة المسموحة
+                    if not _re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", col_name):
+                        continue
+                    if col_type.split()[0].upper() not in _ALLOWED_TYPES:
+                        continue
+                    try:
+                        cur.execute(f"ALTER TABLE competitor_products_store ADD COLUMN {col_name} {col_type}")
+                    except sqlite3.OperationalError:
+                        pass
+                conn.commit()
         except Exception as e:
             log.warning("_ensure_columns: %s", e)
 

@@ -264,16 +264,43 @@ MAHWOUS_EXPERT_SYSTEM = """أنت خبير عالمي في كتابة أوصاف
 
 # أمثلة سياقية (few-shot) — مطابقة منطقية لمتجر مهووس (تُضاف لأنظمة التحقق والتصنيف)
 MATCHING_FEW_SHOT_AR = """
-### أمثلة تعليمية من سياق متجر مهووس (لا تنسخ الأسماء حرفياً في الإجابة — للمنطق فقط)
-
-**مطابقة صحيحة (نفس SKU):**
-- منتجنا: «ديور سوفاج أو دو تواليت 100 مل للرجال» | المنافس: «Dior Sauvage EDT 100ml Men» → تطابق الماركة + الخط + EDT + 100 مل.
-
-**مطابقة خاطئة (0% — منتجان مختلفان):**
-- «ديور سوفاج أو دو بارفان 100 مل» vs «Dior Sauvage Parfum 100ml» → يختلف التركيز (Parfum ≠ EDP) رغم تشابه الاسم.
-- «لانكوم لافي إست بيل أو دو بارفان 50 مل» vs «Lancome La Vie Est Belle EDP 100ml» → يختلف الحجم (50 مقابل 100) **فالمطابقة 0%** حتى لو الاسم متطابق.
-
-**قاعدة:** اختلاف **الحجم (مل)** أو **التركيز** أو **خط المنتج** (مثل Sauvage vs Sauvage Elixir) يعني **ليس نفس المنتج**.
+### أمثلة تعليمية من سياق متجر مهووس (احفظ المنطق — لا تنسخ الأسماء)
+**✅ مطابقة صحيحة (match=true) — نفس SKU بالضبط:**
+1. «ديور سوفاج أو دو تواليت 100 مل للرجال» vs «Dior Sauvage EDT 100ml Men»
+   → نفس الماركة + نفس الخط + نفس التركيز (EDT) + نفس الحجم (100ml)
+   → **match:true, confidence:97**
+2. «شانيل بلو دو شانيل أو دو بارفان 150 مل» vs «Chanel Bleu de Chanel EDP 150ml»
+   → نفس الماركة + نفس الخط + نفس التركيز (EDP) + نفس الحجم
+   → **match:true, confidence:96**
+**❌ مطابقة خاطئة — اختلاف التركيز:**
+3. «ديور سوفاج أو دو بارفان 100 مل» vs «Dior Sauvage Parfum 100ml»
+   → EDP ≠ Parfum (تركيزات مختلفة!)
+   → **match:false, confidence:10, reason:"اختلاف التركيز EDP vs Parfum"**
+**❌ مطابقة خاطئة — اختلاف الحجم:**
+4. «لانكوم لافي إست بيل EDP 50 مل» vs «Lancome La Vie Est Belle EDP 100ml»
+   → 50ml ≠ 100ml
+   → **match:false, confidence:5, reason:"اختلاف الحجم 50ml vs 100ml"**
+**❌ مطابقة خاطئة — Flanker مختلف:**
+5. «فرزاتشي إيروس EDP 100 مل» vs «Versace Eros Flame EDP 100ml»
+   → Eros ≠ Eros Flame (خط مختلف!)
+   → **match:false, confidence:8, reason:"Eros Flame خط عطري مختلف عن Eros"**
+**❌ مطابقة خاطئة — عطر مقابل لوشن/ديودرنت:**
+6. «ديور سوفاج أو دو تواليت 100 مل» vs «Dior Sauvage Deodorant Stick 75g»
+   → عطر (EDT) ≠ مزيل عرق (Deodorant) — فئة مختلفة تماماً!
+   → **match:false, confidence:0, reason:"منتج عناية (ديودرنت) وليس عطر"**
+7. «شانيل N°5 EDP 100ml» vs «Chanel N°5 Body Lotion 200ml»
+   → عطر ≠ لوشن جسم
+   → **match:false, confidence:0, reason:"لوشن جسم وليس عطر"**
+**❌ مطابقة خاطئة — مجموعة/طقم:**
+8. «ديور سوفاج EDT 100ml» vs «Dior Sauvage Gift Set (EDT 100ml + Shower Gel + ASB)»
+   → منتج مفرد ≠ طقم هدايا (حتى لو يحتوي نفس العطر)
+   → **match:false, confidence:15, reason:"طقم هدايا وليس عطر مفرد"**
+**⚠️ قواعد ذهبية:**
+- اختلاف **مل واحد** = **ليس نفس المنتج** (50ml ≠ 75ml ≠ 100ml)
+- **EDP ≠ EDT ≠ Parfum ≠ Elixir ≠ Cologne** — كلها تركيزات مختلفة
+- **عطر ≠ لوشن ≠ ديودرنت ≠ شامبو ≠ كريم ≠ جل ≠ مجموعة** — فئات مختلفة
+- **Eros ≠ Eros Flame**, **Sauvage ≠ Sauvage Elixir**, **La Nuit ≠ La Nuit Intense** — خطوط مختلفة
+- إذا شككت → **match:false** أفضل من false positive
 """
 
 # ══ System Prompts للأقسام ══════════════════════════════════════════════════
@@ -382,12 +409,12 @@ def _call_openrouter(prompt, system=""):
 
     # نماذج مجانية صحيحة (محدَّثة مارس 2026)
     # نماذج مستقرة فقط — بدون النماذج التجريبية (exp)
+    # نماذج مرتبة بالأفضل للعطور: ذكاء لغوي عالي + JSON + عربي
     FREE_MODELS = [
-        "meta-llama/llama-3.3-70b-instruct:free",
-        "deepseek/deepseek-chat-v3-0324:free",
-        "mistralai/mistral-7b-instruct:free",
-        "qwen/qwen-2.5-72b-instruct:free",
-        "google/gemma-3-27b-it:free",
+        "qwen/qwen-2.5-72b-instruct:free",          # الأفضل للعربي + JSON + المنطق
+        "deepseek/deepseek-chat-v3-0324:free",        # ثاني أفضل: منطق قوي جداً
+        "meta-llama/llama-3.3-70b-instruct:free",     # ثالث: جيد للإنجليزي
+        "google/gemma-3-27b-it:free",                 # رابع: سريع + خفيف
     ]
 
     msgs = []
@@ -993,6 +1020,8 @@ def verify_match(p1, p2, pr1=0, pr2=0):
 3. الحجم بالمل متطابق — **50 مل مقابل 100 مل = مطابقة 0%** حتى لو تطابق الاسم.
 4. التركيز متطابق (EDP ≠ Parfum ≠ EDT) — مثال: **Sauvage EDP ≠ Sauvage Parfum**.
 5. الجنس متطابق (Men ≠ Women).
+6. فئة المنتج: عطر مقابل عطر فقط — **لوشن، ديودرنت، شامبو، جل استحمام، كريم، طقم هدايا = ليسوا عطوراً** → match:false.
+7. Flanker check: Sauvage ≠ Sauvage Elixir, Eros ≠ Eros Flame, La Nuit ≠ La Nuit Intense → match:false.
 
 إذا تعذر تحقق أي شرط أعلاه، فالمطابقة **false** وconfidence منخفضة.
 
@@ -1058,6 +1087,84 @@ def reclassify_review_items(items):
             else:                                 r["section"] = "⚠️ تحت المراجعة"
         return data["results"]
     return []
+
+
+def auto_resolve_review_v2(review_df, batch_size=5):
+    """
+    v34: تحليل ذكي لمنتجات 'تحت المراجعة' (60-84%)
+    يرسل دفعات من 5 منتجات لـ AI لاتخاذ قرار: تطابق/لا تطابق
+    يُرجع dict: {index: {"decision": "🔴/🟢/✅/⚠️", "confidence": int, "reason": str}}
+    """
+    if review_df is None or review_df.empty:
+        return {}
+    results = {}
+    items = []
+    for idx, row in review_df.iterrows():
+        our_name = str(row.get("اسم المنتج", row.get("منتجنا", row.get("المنتج", "")))).strip()
+        comp_name = str(row.get("منتج المنافس", row.get("المنافس", row.get("منتج_المنافس", "")))).strip()
+        our_price = float(row.get("سعر المنتج", row.get("سعرنا", row.get("السعر", 0))) or 0)
+        comp_price = float(row.get("سعر المنافس", row.get("سعر_المنافس", 0)) or 0)
+        score = float(row.get("نسبة التطابق", row.get("نسبة_التطابق", 0)) or 0)
+        items.append({
+            "idx": idx,
+            "our": our_name,
+            "comp": comp_name,
+            "our_price": our_price,
+            "comp_price": comp_price,
+            "score": score,
+        })
+    # معالجة بدفعات
+    for i in range(0, len(items), batch_size):
+        batch = items[i:i+batch_size]
+        lines = []
+        for j, it in enumerate(batch):
+            diff = it["our_price"] - it["comp_price"] if it["our_price"] > 0 and it["comp_price"] > 0 else 0
+            lines.append(
+                f'[{j+1}] منتجنا: "{it["our"]}" ({it["our_price"]:.0f}ر.س) '
+                f'vs المنافس: "{it["comp"]}" ({it["comp_price"]:.0f}ر.س) '
+                f'| تطابق: {it["score"]:.0f}% | فرق: {diff:+.0f}ر.س'
+            )
+        prompt = f"""حلل هذه المنتجات المشكوك بها وحدد لكل واحد:
+1. هل هما **نفس العطر فعلاً** (نفس الماركة + نفس الخط + نفس الحجم مل + نفس التركيز)؟
+2. إذا نعم: ما القرار السعري؟
+3. إذا لا: لماذا (اختلاف حجم/تركيز/خط/فئة)؟
+المنتجات:
+{chr(10).join(lines)}
+⚠️ تذكر:
+- عطر ≠ لوشن/ديودرنت/شامبو/طقم
+- 50ml ≠ 100ml حتى لو نفس الاسم
+- EDP ≠ EDT ≠ Parfum حتى لو نفس العطر
+- Eros ≠ Eros Flame, Sauvage ≠ Sauvage Elixir
+أجب JSON فقط:
+{{"results": [
+  {{"idx": 1, "match": true/false, "confidence": 0-100,
+   "decision": "🔴 سعر أعلى" أو "🟢 سعر أقل" أو "✅ موافق" أو "⚪ مستبعد",
+   "reason": "سبب قصير"}}
+]}}
+إذا match=false → decision="⚪ مستبعد"
+"""
+        sys = PAGE_PROMPTS["reclassify"]
+        txt = _call_openrouter(prompt, sys)
+        if not txt:
+            txt = _call_gemini(prompt, sys, temperature=0.1)
+        if not txt:
+            continue
+        data = _parse_json(txt)
+        if data and "results" in data:
+            for r in data["results"]:
+                try:
+                    batch_idx = int(r.get("idx", 0)) - 1
+                    if 0 <= batch_idx < len(batch):
+                        real_idx = batch[batch_idx]["idx"]
+                        results[real_idx] = {
+                            "decision": r.get("decision", "⚠️ تحت المراجعة"),
+                            "confidence": min(100, max(0, int(r.get("confidence", 0)))),
+                            "reason": str(r.get("reason", "")),
+                            "match": bool(r.get("match", False)),
+                        }
+                except (ValueError, IndexError):
+                    continue
+    return results
 
 # ══ بحث أسعار السوق ══════════════════════════════════════════════════════
 def search_market_price(product_name, our_price=0):

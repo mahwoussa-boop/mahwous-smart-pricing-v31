@@ -463,6 +463,58 @@ def _auto_resolve_review(results: dict) -> dict:
     resolved_to_approved = 0
     resolved_to_excluded = 0
 
+    # v34: محاولة تحليل AI أولاً (أكثر دقة)
+    try:
+        from engines.ai_engine import auto_resolve_review_v2
+        ai_results = auto_resolve_review_v2(review_df, batch_size=5)
+        if ai_results:
+            for idx, ai_res in ai_results.items():
+                if idx in review_df.index and ai_res.get("confidence", 0) >= 75:
+                    row = review_df.loc[idx].copy()
+                    dec = ai_res["decision"]
+                    if "أعلى" in dec or dec.startswith("🔴"):
+                        row["القرار"] = f"🔴 سعر أعلى (AI {ai_res['confidence']}%)"
+                        results["price_raise"] = pd.concat(
+                            [results["price_raise"], row.to_frame().T], ignore_index=True)
+                        resolved_to_raise += 1
+                    elif "أقل" in dec or dec.startswith("🟢"):
+                        row["القرار"] = f"🟢 سعر أقل (AI {ai_res['confidence']}%)"
+                        results["price_lower"] = pd.concat(
+                            [results["price_lower"], row.to_frame().T], ignore_index=True)
+                        resolved_to_lower += 1
+                    elif "موافق" in dec or dec.startswith("✅"):
+                        row["القرار"] = f"✅ موافق (AI {ai_res['confidence']}%)"
+                        results["approved"] = pd.concat(
+                            [results["approved"], row.to_frame().T], ignore_index=True)
+                        resolved_to_approved += 1
+                    elif "مستبعد" in dec or dec.startswith("⚪"):
+                        row["القرار"] = f"⚪ مستبعد (AI: {ai_res['reason'][:50]})"
+                        results["excluded"] = pd.concat(
+                            [results["excluded"], row.to_frame().T], ignore_index=True)
+                        resolved_to_excluded += 1
+                    # إزالة من review
+                    review_df = review_df.drop(idx)
+    except Exception as e:
+        import logging
+        logging.warning(f"auto_resolve_review_v2 failed: {e}")
+
+    # تحديث الإجمالي بعد حسم AI (المتبقي يُمرّر للحسم بالدفعات)
+    total_review = len(review_df)
+    if review_df.empty:
+        results["review"] = pd.DataFrame()
+        results["all"] = pd.concat([
+            results.get("price_raise", pd.DataFrame()),
+            results.get("price_lower", pd.DataFrame()),
+            results.get("approved", pd.DataFrame()),
+            results.get("review", pd.DataFrame()),
+            results.get("excluded", pd.DataFrame()),
+        ], ignore_index=True)
+        _log_resolve.info(
+            "AUTO_RESOLVE_REVIEW (AI only): raise=%d, lower=%d, approved=%d, excluded=%d",
+            resolved_to_raise, resolved_to_lower, resolved_to_approved, resolved_to_excluded,
+        )
+        return results
+
     BATCH_SIZE = 30
     all_rows = review_df.reset_index(drop=True)
 
@@ -612,9 +664,11 @@ def _reconciliation_check(results: dict) -> dict:
         _log_rc.warning("DUPLICATE_CHECK error: %s", _dup_err)
 
     # ── شرط اتساق المصدرين: excluded (أيتام) vs missing count ──
+    # excluded يحتوي المفقود (missing) + ما حُسم آلياً من review كمستبعد،
+    # لذا الشرط الصحيح: excluded_count >= missing_count (وليس المساواة).
     excluded_count = bucket_counts["excluded"]
     missing_count = len(results.get("missing", pd.DataFrame()))
-    sources_consistent = (excluded_count == missing_count)
+    sources_consistent = (excluded_count >= missing_count)
 
     check = {
         "all_count": all_count,
@@ -3409,9 +3463,10 @@ if page == "📊 لوحة التحكم":
                         our_df = our_df.head(int(max_rows))
 
                     # ── حفظ تلقائي للكتالوج ──
+                    # session_state يُحدَّث دائماً حتى لو فشل حفظ CSV على القرص
+                    st.session_state.our_df = our_df
                     try:
                         our_df.to_csv(_OUR_CATALOG_PATH, index=False, encoding="utf-8-sig")
-                        st.session_state.our_df = our_df
                     except Exception:
                         pass
                     comp_dfs = {}
@@ -6183,23 +6238,25 @@ elif page == "🕷️ كشط المنافسين":
             # Parallelism: run every registered competitor at the same time.
             # parallel_stores=25 covers the current 18 stores + headroom for growth.
             _parallel_stores_arg = int(st.session_state.get("sc_parallel_stores", 25))
-            proc = subprocess.Popen(
-                [
-                    _sys_sc.executable, _SCRAPER_SCRIPT,
-                    "--max-products",    str(max_prod),
-                    "--concurrency",     str(concurrency),
-                    "--parallel-stores", str(_parallel_stores_arg),
-                ],
-                stdout=subprocess.DEVNULL,
-                stderr=log_fh,
-                start_new_session=True,  # عملية مستقلة تماماً عن Streamlit
-            )
-
-            # إغلاق مقبض الملف بعد تمريره للعملية الفرعية — لمنع تسرب file descriptors
+            # try/finally: يضمن إغلاق log_fh حتى لو فشل Popen — لمنع تسرب file descriptors
             try:
-                log_fh.close()
-            except Exception:
-                pass
+                proc = subprocess.Popen(
+                    [
+                        _sys_sc.executable, _SCRAPER_SCRIPT,
+                        "--max-products",    str(max_prod),
+                        "--concurrency",     str(concurrency),
+                        "--parallel-stores", str(_parallel_stores_arg),
+                    ],
+                    stdout=subprocess.DEVNULL,
+                    stderr=log_fh,
+                    start_new_session=True,  # عملية مستقلة تماماً عن Streamlit
+                )
+            finally:
+                # إغلاق مقبض الملف بعد تمريره للعملية الفرعية (أو عند فشلها)
+                try:
+                    log_fh.close()
+                except Exception:
+                    pass
             # حفظ PID فوراً قبل أي شيء آخر
             with open(_PID_FILE, "w", encoding="utf-8") as pf:
                 pf.write(str(proc.pid))

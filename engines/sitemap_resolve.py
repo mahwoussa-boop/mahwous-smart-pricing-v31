@@ -34,6 +34,9 @@ _SITEMAP_SYNC_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
     max_workers=4,
     thread_name_prefix="sitemap-sync",
 )
+# إغلاق نظيف للمجمّع عند خروج العملية — لمنع تعليق الخيوط
+import atexit as _atexit
+_atexit.register(lambda: _SITEMAP_SYNC_EXECUTOR.shutdown(wait=False))
 
 from scrapers.anti_ban import (
     fetch_with_retry,
