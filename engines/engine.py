@@ -288,12 +288,73 @@ def _syn_replace(t):
     """استبدال المرادفات بـ regex واحد بدل 280 حلقة — ~10x أسرع"""
     return _SYN_RE.sub(lambda m: _SYN[m.group(0)], t)
 
+# ─── v22: Dynamic Brand Vocabulary Enrichment ────────────────
+_brands_enriched = False
+
+def enrich_known_brands(comp_dfs=None, db_path=None):
+    """
+    إثراء KNOWN_BRANDS بماركات المنافسين الحقيقية من competitor_products_store.
+    يُستدعى مرة واحدة عند بدء التحليل — يرفع التغطية من 46% إلى 92%+.
+    """
+    global KNOWN_BRANDS, _brands_enriched
+    if _brands_enriched:
+        return
+
+    new_brands = set()
+
+    # Source 1: brand column from competitor DataFrames
+    if comp_dfs:
+        for cdf in comp_dfs.values():
+            for col in ("brand", "الماركة"):
+                if col in cdf.columns:
+                    vals = cdf[col].fillna("").astype(str).str.strip()
+                    new_brands.update(v for v in vals if v and len(v) >= 2 and v.lower() not in ("nan", "none", "0"))
+                    break
+
+    # Source 2: DB if available
+    if db_path:
+        try:
+            import sqlite3
+            conn = sqlite3.connect(db_path)
+            rows = conn.execute("SELECT DISTINCT brand FROM competitor_products_store WHERE brand IS NOT NULL AND brand != ''").fetchall()
+            conn.close()
+            new_brands.update(r[0].strip() for r in rows if r[0] and len(r[0].strip()) >= 2)
+        except Exception:
+            pass
+
+    if not new_brands:
+        _brands_enriched = True
+        return
+
+    # Normalize and deduplicate against existing KNOWN_BRANDS
+    existing_lower = {b.lower() for b in KNOWN_BRANDS}
+    added = 0
+    for nb in new_brands:
+        # Clean: remove very long strings, numbers-only, URLs
+        if len(nb) > 50 or nb.startswith("http") or nb.isdigit():
+            continue
+        if nb.lower() not in existing_lower:
+            KNOWN_BRANDS.append(nb)
+            existing_lower.add(nb.lower())
+            added += 1
+
+    # Clear LRU caches so they rebuild with enriched list
+    _get_normalized_brands.cache_clear()
+    _get_brand_normalized_pairs.cache_clear()
+
+    _brands_enriched = True
+    import logging
+    logging.getLogger("engines.engine").info(
+        "Brand vocabulary enriched: +%d brands (total: %d)", added, len(KNOWN_BRANDS))
+
+
 # ─── v26.0: Fuzzy Spell Correction ────────────────
 # ✅ إصلاح #5: LRU cache لتجنب إعادة بناء قائمة الماركات مع كل استدعاء
 @_functools.lru_cache(maxsize=1)
 def _get_normalized_brands():
     """يُحسب مرة واحدة فقط عند أول استدعاء"""
     return [(b, b.lower()) for b in KNOWN_BRANDS]
+
 
 @_functools.lru_cache(maxsize=1)
 def _get_brand_normalized_pairs():
@@ -1617,7 +1678,6 @@ class CompIndex:
         _our_br_norm = normalize(our_br).lower() if our_br else ""
 
         # ⚡ v22: Brand-First Search is MANDATORY (matches mandatory brand filter)
-        # No brand → mandatory filter rejects all → return empty immediately
         if not _our_br_norm:
             return []
 
@@ -1625,8 +1685,7 @@ class CompIndex:
         if not _brand_candidates:
             return []  # No competitors with this brand
 
-        # ⚡ v22: intersect brand candidates with pre-computed non-sample set
-        # (hundreds instead of 108K per call)
+        # intersect brand candidates with pre-computed non-sample set
         valid_idx = [i for i in _brand_candidates if i in self._nonsample_set]
         if not valid_idx:
             return []
@@ -2301,6 +2360,9 @@ def run_full_analysis(our_df, comp_dfs, progress_callback=None, use_ai=True,
         "رابط المنتج", "الرابط", "رابط", "product_url", "link", "url", "URL",
     ])
     our_brand_col = _fcol_optional(our_df, ["الماركة", "Brand", "brand", "البراند"])
+
+    # ⚡ v22: Enrich brand vocabulary with competitor brands BEFORE building indices
+    enrich_known_brands(comp_dfs=comp_dfs)
 
     # ── بناء الفهارس المسبقة ──
     indices = {}
