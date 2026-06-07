@@ -4,6 +4,8 @@ port = 8501
 fileWatcherType = "none"
 runOnSave = false
 maxUploadSize = 500
+maxMessageSize = 400
+enableStaticServing = false
 
 [browser]
 gatherUsageStats = false

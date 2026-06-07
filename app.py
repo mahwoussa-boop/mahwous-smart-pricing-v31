@@ -738,7 +738,13 @@ def _dedup_missing_vs_matched(results: dict) -> dict:
 # ── تحديث حي بدون مكوّنات مخصصة (streamlit-autorefresh يفشل غالباً على السحابة/الوكيل) ───────────────
 @st.fragment(run_every=4)
 def _render_analysis_job_progress_live() -> None:
-    """v31: auto-refresh progress + auto-apply results on completion."""
+    """v31-fix: auto-refresh progress + flag results on completion.
+    
+    CRITICAL FIX: لا نستدعي _auto_resolve_review هنا (طلبات AI بطيئة تسبب
+    timeout/OOM داخل fragment). ولا نستدعي st.rerun() (يسبب حلقة لا نهائية
+    داخل fragment). بدلاً من ذلك نُعيّن flag في session_state ليُطبَّق
+    في الدورة التالية خارج الـ fragment.
+    """
     jid = st.session_state.get("job_id")
     if not jid:
         return
@@ -746,27 +752,34 @@ def _render_analysis_job_progress_live() -> None:
     if not job:
         return
     _st = str(job.get("status", ""))
-    # Auto-apply results when job completes
+    # Auto-apply results when job completes — بدون AI ولا rerun
     if _st == "done":
+        if st.session_state.get("_applied_job_results_id") == jid:
+            return  # تم تطبيقه سابقاً — لا تكرار
         if job.get("results"):
-            _rs = restore_results_from_json(job["results"])
-            _df = pd.DataFrame(_rs)
-            _mdf = pd.DataFrame(job.get("missing", [])) if job.get("missing") else pd.DataFrame()
-            _sp = _split_results(_df)
-            _sp = _auto_resolve_review(_sp)
-            _sp["missing"] = _mdf
-            _sp = _dedup_missing_vs_matched(_sp)
-            st.session_state.results = _sp
-            st.session_state.analysis_df = _df
+            try:
+                _rs = restore_results_from_json(job["results"])
+                _df = pd.DataFrame(_rs)
+                _mdf = pd.DataFrame(job.get("missing", [])) if job.get("missing") else pd.DataFrame()
+                _sp = _split_results(_df)
+                # ⚠️ لا نستدعي _auto_resolve_review هنا — يُؤجَّل للشريط الجانبي
+                _sp["missing"] = _mdf
+                _sp = _dedup_missing_vs_matched(_sp)
+                st.session_state.results = _sp
+                st.session_state.analysis_df = _df
+            except Exception as _frag_err:
+                import logging as _frag_log
+                _frag_log.warning("Fragment result apply failed: %s", _frag_err)
         st.session_state.last_audit_stats = job.get("audit") or {}
         st.session_state.job_running = False
         st.session_state["_applied_job_results_id"] = jid
+        # ✅ Flag بدلاً من st.rerun() — يُلتقط خارج الـ fragment
+        st.session_state["_fragment_needs_rerun"] = True
         st.balloons()
-        st.rerun()
         return
     if _st != "running":
         st.session_state.job_running = False
-        st.rerun()
+        st.session_state["_fragment_needs_rerun"] = True
         return
     tot = max(int(job.get("total") or 0), 1)
     proc = min(int(job.get("processed") or 0), tot)
@@ -978,7 +991,12 @@ if st.session_state.results is None and not st.session_state.job_running:
                     pass
 
             _auto_r = _split_results(_auto_df)
-            _auto_r = _auto_resolve_review(_auto_r)
+            # FIX: لف _auto_resolve_review بحماية — فشله لا يمنع تحميل النتائج
+            try:
+                _auto_r = _auto_resolve_review(_auto_r)
+            except Exception as _ar_err:
+                import logging as _ar_log
+                _ar_log.warning("auto_resolve_review skipped on startup: %s", _ar_err)
             _auto_r["missing"] = _auto_miss
             _auto_r = _dedup_missing_vs_matched(_auto_r)
             st.session_state.results     = _auto_r
@@ -2743,15 +2761,24 @@ with st.sidebar:
                 if st.session_state.get("_applied_job_results_id") != st.session_state.job_id:
                     st.session_state["_applied_job_results_id"] = st.session_state.job_id
                     if job.get("results"):
-                        _restored = restore_results_from_json(job["results"])
-                        df_all = pd.DataFrame(_restored)
-                        missing_df = pd.DataFrame(job.get("missing", [])) if job.get("missing") else pd.DataFrame()
-                        _r = _split_results(df_all)
-                        _r = _auto_resolve_review(_r)
-                        _r["missing"] = missing_df
-                        _r = _dedup_missing_vs_matched(_r)
-                        st.session_state.results = _r
-                        st.session_state.analysis_df = df_all
+                        try:
+                            _restored = restore_results_from_json(job["results"])
+                            df_all = pd.DataFrame(_restored)
+                            missing_df = pd.DataFrame(job.get("missing", [])) if job.get("missing") else pd.DataFrame()
+                            _r = _split_results(df_all)
+                            # FIX: لف _auto_resolve_review بحماية — فشله لا يمنع عرض النتائج
+                            try:
+                                _r = _auto_resolve_review(_r)
+                            except Exception as _sb_ar_err:
+                                import logging as _sb_ar_log
+                                _sb_ar_log.warning("auto_resolve_review skipped in sidebar: %s", _sb_ar_err)
+                            _r["missing"] = missing_df
+                            _r = _dedup_missing_vs_matched(_r)
+                            st.session_state.results = _r
+                            st.session_state.analysis_df = df_all
+                        except Exception as _sb_apply_err:
+                            import logging as _sb_log
+                            _sb_log.error("Sidebar result apply failed: %s", _sb_apply_err)
                     st.session_state.last_audit_stats = job.get("audit") or {}
                     st.session_state.job_running = False
                     st.balloons()
@@ -2827,6 +2854,11 @@ with st.sidebar:
         for _w in _sb_warns:
             st.sidebar.caption(f"🔔 {_w}")
 
+
+# ── FIX: Fragment rerun handler — يلتقط الـ flag من _render_analysis_job_progress_live ──
+# st.rerun() داخل @st.fragment يسبب حلقة لانهائية، لذا نستخدم flag بدلاً منه
+if st.session_state.pop("_fragment_needs_rerun", False):
+    st.rerun()
 
 # إشعار خفيف بعد الانتقال من أزرار لوحة التحكم
 if st.session_state.get("nav_flash"):
