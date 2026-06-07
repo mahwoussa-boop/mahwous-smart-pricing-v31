@@ -10,8 +10,10 @@ data/*.json
 # ── Exports (ملفات التصدير) ──
 exports/
 
-# ── Temporary/scratch ──
+# ── Temporary/scratch (but keep __init__.py!) ──
 _*.py
+!__init__.py
+!*/__init__.py
 __pycache__/
 *.pyc
 .env
