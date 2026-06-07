@@ -255,10 +255,12 @@ async def main():
 
     # Check what's already well-scraped
     conn = get_db()
-    existing = {}
-    for row in conn.execute("SELECT competitor, COUNT(*) FROM competitor_products_store WHERE price > 0 GROUP BY competitor").fetchall():
-        existing[row[0]] = row[1]
-    conn.close()
+    try:
+        existing = {}
+        for row in conn.execute("SELECT competitor, COUNT(*) FROM competitor_products_store WHERE price > 0 GROUP BY competitor").fetchall():
+            existing[row[0]] = row[1]
+    finally:
+        conn.close()
 
     # Only scrape stores with < 50 products
     to_scrape = []
@@ -322,12 +324,14 @@ async def main():
     # Final summary
     elapsed = time.time() - start
     conn = get_db()
-    rows = conn.execute("""
-        SELECT competitor, COUNT(*) as total, SUM(CASE WHEN price > 0 THEN 1 ELSE 0 END) as priced
-        FROM competitor_products_store GROUP BY competitor ORDER BY total DESC
-    """).fetchall()
-    grand = conn.execute("SELECT COUNT(*) FROM competitor_products_store WHERE price > 0").fetchone()[0]
-    conn.close()
+    try:
+        rows = conn.execute("""
+            SELECT competitor, COUNT(*) as total, SUM(CASE WHEN price > 0 THEN 1 ELSE 0 END) as priced
+            FROM competitor_products_store GROUP BY competitor ORDER BY total DESC
+        """).fetchall()
+        grand = conn.execute("SELECT COUNT(*) FROM competitor_products_store WHERE price > 0").fetchone()[0]
+    finally:
+        conn.close()
 
     print(f"\n{'='*60}")
     print(f"  SCRAPE COMPLETE — {elapsed:.0f}s ({elapsed/60:.1f} min)")

@@ -92,8 +92,9 @@ class FetchRouter:
                 if entry["fails"][strategy] >= _FAIL_THRESHOLD and strategy in entry["order"]:
                     entry["order"].remove(strategy)
                     entry["order"].append(strategy)  # demote to the back
-            # Persist occasionally — every 10 updates at most
-            if sum(entry["fails"].values()) % 10 == 0:
+            # Persist occasionally — every 10 failure updates at most
+            fail_total = sum(entry["fails"].values())
+            if fail_total > 0 and fail_total % 10 == 0:
                 self._save()
 
 

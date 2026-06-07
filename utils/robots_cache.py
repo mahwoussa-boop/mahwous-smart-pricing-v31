@@ -28,6 +28,7 @@ _FETCH_TIMEOUT = 8
 
 _CACHE: Dict[str, Tuple[RobotFileParser, float]] = {}
 _LOCKS: Dict[str, asyncio.Lock] = {}
+_LOCKS_LOOP_ID: int = 0  # id() of the event loop that owns current locks
 
 
 def _base_of(url: str) -> str:
@@ -62,6 +63,17 @@ async def get_parser(
     hit = _CACHE.get(base)
     if hit and (now - hit[1]) < _TTL_SECONDS:
         return hit[0]
+
+    global _LOCKS_LOOP_ID
+    try:
+        current_loop_id = id(asyncio.get_running_loop())
+    except RuntimeError:
+        current_loop_id = 0
+
+    # Flush stale locks when the event loop has been replaced
+    if current_loop_id and current_loop_id != _LOCKS_LOOP_ID:
+        _LOCKS.clear()
+        _LOCKS_LOOP_ID = current_loop_id
 
     lock = _LOCKS.setdefault(base, asyncio.Lock())
     async with lock:

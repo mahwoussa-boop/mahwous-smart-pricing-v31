@@ -22,6 +22,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, List, Optional
 from urllib.parse import urlparse
+from contextvars import ContextVar
 
 import concurrent.futures
 
@@ -37,6 +38,8 @@ _SYNC_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
     max_workers=50,
     thread_name_prefix="scraper-sync",
 )
+import atexit as _atexit_sync
+_atexit_sync.register(lambda: _SYNC_EXECUTOR.shutdown(wait=False))
 
 if os.name == "nt":
     try:
@@ -49,6 +52,7 @@ if os.name == "nt":
 _STATE_WRITE_LOCK    = threading.Lock()
 _PROGRESS_WRITE_LOCK = threading.Lock()
 _LIVE_WRITE_LOCK     = threading.Lock()
+_CSV_WRITE_LOCK      = threading.Lock()
 
 # ─── إعداد السجل ─────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -506,6 +510,10 @@ def _product_fields_from_all_json_ld(html: str) -> dict:
 _DOMAIN_AIOHTTP_403: Dict[str, int] = {}
 _DOMAIN_SKIP_THRESHOLD = 0  # Skip aiohttp entirely — curl_cffi chrome104 bypasses Cloudflare
 
+# Per-task browser_like_http fetcher — ContextVar provides per-asyncio-task
+# isolation so concurrent store scrapes don't overwrite each other's fetcher.
+_blh_fetcher_var: ContextVar[Any] = ContextVar('_blh_fetcher', default=None)
+
 
 async def fetch_product(
     session: aiohttp.ClientSession,
@@ -525,8 +533,8 @@ async def fetch_product(
                     )
                 logger.debug("robots.txt disallowed: %s", url)
                 return None
-        except Exception as _re:
-            logger.debug("robots check error %s: %s", url, _re)
+        except Exception as _rob_err:
+            logger.debug("robots check error %s: %s", url, _rob_err)
 
         json_url = url if url.endswith(".json") else url.rstrip("/") + ".json"
 
@@ -638,7 +646,7 @@ async def fetch_product(
             try:
                 from browser_like_http import async_scraper_http_stack
                 # Use module-level shared fetcher if available, else quick one-off
-                _blh_fetcher = getattr(fetch_product, '_blh_fetcher', None)
+                _blh_fetcher = _blh_fetcher_var.get(None)
                 if _blh_fetcher is not None:
                     code, text = await _blh_fetcher.get_text_once(url, timeout=15.0)
                     if code == 200 and text and len(text) > 500:
@@ -940,11 +948,11 @@ async def scrape_one_store(
         from browser_like_http import AsyncScraperHTTP
         _blh = AsyncScraperHTTP()
         await _blh.__aenter__()
-        fetch_product._blh_fetcher = _blh
+        _blh_fetcher_var.set(_blh)
         logger.info(f"🛡️ {domain} — AsyncScraperHTTP (chrome104) مفعّل")
     except Exception as _blh_err:
         logger.debug("browser_like_http unavailable: %s", _blh_err)
-        fetch_product._blh_fetcher = None
+        _blh_fetcher_var.set(None)
 
     try:
         if external_session is not None:
@@ -1374,7 +1382,7 @@ async def scrape_one_store(
                 await _blh.__aexit__(None, None, None)
             except Exception:
                 pass
-            fetch_product._blh_fetcher = None
+            _blh_fetcher_var.set(None)
         await asyncio.sleep(0.25)
 
     if not _force_run:
@@ -1614,14 +1622,15 @@ def _merge_rows_to_csv(new_rows: List[dict], domain: str) -> int:
         if col not in new_df.columns:
             new_df[col] = ""
 
-    try:
-        old_df = pd.read_csv(OUTPUT_CSV, encoding="utf-8-sig", low_memory=False)
-        old_df = old_df[old_df["store"].astype(str) != domain]
-        combined = pd.concat([old_df, new_df[CSV_COLS]], ignore_index=True)
-    except Exception:
-        combined = new_df[CSV_COLS]
+    with _CSV_WRITE_LOCK:
+        try:
+            old_df = pd.read_csv(OUTPUT_CSV, encoding="utf-8-sig", low_memory=False)
+            old_df = old_df[old_df["store"].astype(str) != domain]
+            combined = pd.concat([old_df, new_df[CSV_COLS]], ignore_index=True)
+        except Exception:
+            combined = new_df[CSV_COLS]
 
-    combined.to_csv(OUTPUT_CSV, index=False, encoding="utf-8-sig")
+        combined.to_csv(OUTPUT_CSV, index=False, encoding="utf-8-sig")
     
     # v26.0 — Persistent Store Sync
     # Phase 2 Item 5: route through canonical normalizer for consistency
@@ -1645,7 +1654,8 @@ def _merge_rows_to_csv(new_rows: List[dict], domain: str) -> int:
 
 def _count_csv_rows() -> int:
     try:
-        return sum(1 for _ in open(OUTPUT_CSV, encoding="utf-8-sig")) - 1
+        with open(OUTPUT_CSV, encoding="utf-8-sig") as f:
+            return sum(1 for _ in f) - 1
     except Exception:
         return 0
 

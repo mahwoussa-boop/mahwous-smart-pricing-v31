@@ -6,6 +6,7 @@ import html as html_std
 import io
 import logging
 import re
+from functools import lru_cache
 from typing import Dict, Optional
 from urllib.parse import urlparse
 
@@ -250,6 +251,7 @@ def parse_pasted_text(text: str):
 
 
 # ===== fetch_og_image_url =====
+@lru_cache(maxsize=256)
 def fetch_og_image_url(url: str, timeout: float = 6.0) -> str:
     """يجلب og:image (أو twitter:image) من HTML صفحة المنتج."""
     u = (url or "").strip()

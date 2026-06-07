@@ -266,7 +266,7 @@ class ReanalysisEngine:
         logger.info(f"⏳ معالجة {len(self.pending_reanalysis)} منتج من قائمة الانتظار...")
         
         results = {}
-        for product_id, item in self.pending_reanalysis.items():
+        for product_id, item in list(self.pending_reanalysis.items()):
             result = self.reanalyze_single_product(
                 product_id,
                 item["data"],

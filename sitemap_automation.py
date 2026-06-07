@@ -22,6 +22,7 @@ import os
 import sys
 import json
 import random
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime

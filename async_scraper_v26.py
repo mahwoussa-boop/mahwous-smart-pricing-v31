@@ -107,7 +107,7 @@ _CHECKPOINT_EVERY = _env_int("SCRAPER_CHECKPOINT_EVERY", 100)
 _CLEAR_CK = os.environ.get("SCRAPER_CLEAR_CHECKPOINT", "").strip() in ("1", "true", "yes")
 _MAX_CONCURRENT_FETCH = max(1, min(64, _env_int("SCRAPER_MAX_CONCURRENT_FETCH", 28)))
 _HEURISTIC_MODE = (os.environ.get("SCRAPER_HEURISTIC_MODE", "loose") or "loose").strip().lower()
-_PIPELINE_EVERY = int(os.environ.get("SCRAPER_PIPELINE_EVERY", "100"))
+_PIPELINE_EVERY = _env_int("SCRAPER_PIPELINE_EVERY", 100)
 _PIPELINE_AI_PARTIAL = os.environ.get("SCRAPER_PIPELINE_AI_PARTIAL", "").strip().lower() in (
     "1",
     "true",
@@ -722,7 +722,8 @@ def write_competitors_csv(rows: list[dict[str, Any]]) -> None:
 def _save_checkpoint(seeds_fp: str, processed: set[str], rows: list[dict[str, Any]]) -> None:
     os.makedirs(DATA_DIR, exist_ok=True)
     try:
-        with open(CHECKPOINT_JSON, "w", encoding="utf-8") as f:
+        _tmp = CHECKPOINT_JSON + ".tmp"
+        with open(_tmp, "w", encoding="utf-8") as f:
             json_dump(
                 {
                     "seeds_fp": seeds_fp,
@@ -733,6 +734,7 @@ def _save_checkpoint(seeds_fp: str, processed: set[str], rows: list[dict[str, An
                 f,
                 ensure_ascii=False,
             )
+        os.replace(_tmp, CHECKPOINT_JSON)
         if rows:
             with open(CHECKPOINT_CSV, "w", encoding="utf-8-sig", newline="") as f:
                 w = csv.DictWriter(

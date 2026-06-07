@@ -99,7 +99,8 @@ def _check_competitors_file(rep: DiagnosticReport) -> None:
                   "لا يوجد ملف متاجر بعد — أضف متاجرك من صفحة الكشط")
         return
     try:
-        data = json.loads(open(path, encoding="utf-8").read())
+        with open(path, encoding="utf-8") as f:
+            data = json.loads(f.read())
         count = len(data) if isinstance(data, list) else 0
         rep.pass_("competitors_file", f"{count} متجر مُعرَّف ({path})")
     except Exception as exc:

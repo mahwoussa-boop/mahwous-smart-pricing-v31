@@ -136,7 +136,7 @@ async def _fetch_sub_sitemap(session, url, sem, headers):
     return urls
 
 
-async def scrape_price_fast(session, url, sem, store_stats):
+async def scrape_price_fast(session, url, global_sem, store_sem, store_stats):
     """Ultra-fast price scraper — lightweight HTTP only"""
     headers = {
         "User-Agent": random.choice(USER_AGENTS),
@@ -145,7 +145,8 @@ async def scrape_price_fast(session, url, sem, store_stats):
         "Accept-Encoding": "gzip, deflate",
     }
     
-    async with sem:
+    async with global_sem:
+      async with store_sem:
         await asyncio.sleep(INTER_REQUEST_DELAY + random.uniform(0, 0.2))
         
         try:
@@ -251,7 +252,7 @@ async def scrape_store(session, store_name, urls, global_sem, store_sem):
     chunk_size = 100
     for chunk_start in range(0, len(urls), chunk_size):
         chunk = urls[chunk_start:chunk_start + chunk_size]
-        tasks = [scrape_price_fast(session, url, store_sem, stats) for url in chunk]
+        tasks = [scrape_price_fast(session, url, global_sem, store_sem, stats) for url in chunk]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
         for url, res in zip(chunk, results):
@@ -308,10 +309,12 @@ async def main():
     # Register in DB
     init_db()
     conn = get_db()
-    for c in comps:
-        conn.execute("INSERT OR IGNORE INTO competitors (name, domain, is_active) VALUES (?, ?, 1)", (c["name"], c["store_url"]))
-    conn.commit()
-    conn.close()
+    try:
+        for c in comps:
+            conn.execute("INSERT OR IGNORE INTO competitors (name, domain, is_active) VALUES (?, ?, 1)", (c["name"], c["store_url"]))
+        conn.commit()
+    finally:
+        conn.close()
     
     # Semaphores
     global_sem = asyncio.Semaphore(MAX_CONCURRENT_TOTAL)
@@ -374,9 +377,11 @@ async def main():
     
     # DB verification
     conn = get_db()
-    db_total = conn.execute("SELECT COUNT(*) FROM competitor_products_store").fetchone()[0]
-    db_priced = conn.execute("SELECT COUNT(*) FROM competitor_products_store WHERE price > 0").fetchone()[0]
-    conn.close()
+    try:
+        db_total = conn.execute("SELECT COUNT(*) FROM competitor_products_store").fetchone()[0]
+        db_priced = conn.execute("SELECT COUNT(*) FROM competitor_products_store WHERE price > 0").fetchone()[0]
+    finally:
+        conn.close()
     
     print("\n" + "="*60)
     print(f"  TURBO SCRAPER COMPLETE")

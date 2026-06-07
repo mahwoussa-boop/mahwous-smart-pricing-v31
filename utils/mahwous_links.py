@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 import re
 import json
+import threading
 import time
 import unicodedata
 from typing import Optional, Dict, List, Tuple
@@ -157,26 +158,29 @@ def refresh_cache() -> Dict[str, any]:
 
 
 _MEM_CACHE: Optional[Dict] = None
+_MEM_LOCK = threading.Lock()
 
 
 def _load_cache() -> Dict:
     global _MEM_CACHE
-    if _MEM_CACHE is not None:
+    with _MEM_LOCK:
+        if _MEM_CACHE is not None:
+            return _MEM_CACHE
+        if not os.path.exists(CACHE_PATH):
+            _MEM_CACHE = {"categories": [], "brands": [], "fetched_at": 0}
+            return _MEM_CACHE
+        try:
+            with open(CACHE_PATH, "r", encoding="utf-8") as f:
+                _MEM_CACHE = json.load(f)
+        except Exception:
+            _MEM_CACHE = {"categories": [], "brands": [], "fetched_at": 0}
         return _MEM_CACHE
-    if not os.path.exists(CACHE_PATH):
-        _MEM_CACHE = {"categories": [], "brands": [], "fetched_at": 0}
-        return _MEM_CACHE
-    try:
-        with open(CACHE_PATH, "r", encoding="utf-8") as f:
-            _MEM_CACHE = json.load(f)
-    except Exception:
-        _MEM_CACHE = {"categories": [], "brands": [], "fetched_at": 0}
-    return _MEM_CACHE
 
 
 def reload_cache() -> None:
     global _MEM_CACHE
-    _MEM_CACHE = None
+    with _MEM_LOCK:
+        _MEM_CACHE = None
     _load_cache()
 
 

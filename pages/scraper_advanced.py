@@ -11,6 +11,7 @@ pages/scraper_advanced.py — لوحة كشط مهووس v4.0 (Real-Time Intelli
 """
 from __future__ import annotations
 
+import html as _html
 import json
 import os
 import threading
@@ -458,7 +459,7 @@ def show() -> None:
                 f'<div class="sc-card {sc_cls}">'
                 f'<div style="display:flex;justify-content:space-between;align-items:center">'
                 f'<div>'
-                f'<span style="font-weight:700;font-size:1rem">{icon} {domain}</span>'
+                f'<span style="font-weight:700;font-size:1rem">{icon} {_html.escape(domain)}</span>'
                 f'&nbsp;<span class="sc-badge {badge}">{status}</span>'
                 f'</div>'
                 f'<div style="font-size:.75rem;color:#4fc3f7">'
@@ -637,7 +638,7 @@ def show() -> None:
             f'<div style="text-align:center;padding:20px 0">'
             f'<div class="live-count">{db_count:,}</div>'
             f'<div style="color:#607d8b;font-size:.9rem;margin-top:6px">'
-            f'منتج {"من " + filter_domain if filter_domain else "إجمالي"} في قاعدة البيانات</div>'
+            f'منتج {"من " + _html.escape(filter_domain) if filter_domain else "إجمالي"} في قاعدة البيانات</div>'
             f'</div>',
             unsafe_allow_html=True
         )
@@ -968,7 +969,7 @@ def show() -> None:
                         f"{_badge}</span>"
                         f"<div class='num' style='color:{_dot_color};font-size:1.25rem'>"
                         f"{_store_count:,}</div>"
-                        f"<div class='lbl' style='word-break:break-all'>{_store_name}</div>"
+                        f"<div class='lbl' style='word-break:break-all'>{_html.escape(_store_name)}</div>"
                         f"</div>"
                     )
                 _store_html += "</div>"

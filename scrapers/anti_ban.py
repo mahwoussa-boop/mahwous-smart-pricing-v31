@@ -444,14 +444,28 @@ def get_rate_limiter() -> AdaptiveRateLimiter:
 _DOMAIN_CONCURRENCY_DEFAULT = int(os.environ.get("DOMAIN_CONCURRENCY", "4"))
 _DOMAIN_SEMAPHORES: dict[str, asyncio.Semaphore] = {}
 _DOMAIN_SEM_LOCK = threading.Lock()
+_DOMAIN_SEM_LOOP_ID: int = 0  # id() of the event loop that created current semaphores
 
 
 def get_domain_semaphore(domain: str) -> asyncio.Semaphore:
-    """Return (and lazily create) a per-domain concurrency semaphore."""
-    sem = _DOMAIN_SEMAPHORES.get(domain)
-    if sem is not None:
-        return sem
+    """Return (and lazily create) a per-domain concurrency semaphore.
+
+    Semaphores are invalidated when the event loop changes (e.g. after a
+    second ``asyncio.run()`` call in the same process) to prevent
+    ``RuntimeError: ... attached to a different event loop``.
+    """
+    global _DOMAIN_SEM_LOOP_ID
+    try:
+        current_loop_id = id(asyncio.get_running_loop())
+    except RuntimeError:
+        current_loop_id = 0
+
     with _DOMAIN_SEM_LOCK:
+        # Flush stale semaphores when the event loop has been replaced
+        if current_loop_id and current_loop_id != _DOMAIN_SEM_LOOP_ID:
+            _DOMAIN_SEMAPHORES.clear()
+            _DOMAIN_SEM_LOOP_ID = current_loop_id
+
         sem = _DOMAIN_SEMAPHORES.get(domain)
         if sem is None:
             sem = asyncio.Semaphore(_DOMAIN_CONCURRENCY_DEFAULT)
@@ -581,10 +595,11 @@ async def fetch_with_retry(
 #  6. Thread-safe singleton fallback sessions
 # ══════════════════════════════════════════════════════════════════════════
 _SESSION_LOCK  = threading.Lock()
-_CFFI_SESSION  = None
-_CFFI_SESSIONS: Dict[str, object] = {}  # keyed by impersonate string
-_CLOUD_SCRAPER = None
-_REQ_SESSION   = None
+# Per-thread session storage — requests.Session and curl_cffi.Session are NOT
+# thread-safe.  Using threading.local() gives each ThreadPoolExecutor worker
+# its own session instance, preventing cookie corruption and segfaults.
+_thread_local  = threading.local()
+_CFFI_SESSIONS: Dict[str, object] = {}  # keyed by impersonate string (guarded by _SESSION_LOCK)
 
 # When a caller asks for an impersonate value that the installed curl_cffi
 # doesn't recognise, try these same-family fallbacks so we still get a
@@ -599,13 +614,9 @@ def _get_cffi_session(impersonate: Optional[str] = None):
     """
     Return a curl_cffi Session.
 
-    impersonate=None → legacy singleton (tries chrome131 → 110).
-    impersonate=<str> → cached per-value session. If the exact string fails
-    to initialise we try the family fallbacks in _IMPERSONATE_FALLBACKS
-    so a curl_cffi version mismatch degrades gracefully.
+    impersonate=None → per-thread default session (tries chrome131 → 110).
+    impersonate=<str> → cached per-value session (shared cache, guarded by lock).
     """
-    global _CFFI_SESSION
-
     if impersonate:
         sess = _CFFI_SESSIONS.get(impersonate)
         if sess is not None:
@@ -627,46 +638,44 @@ def _get_cffi_session(impersonate: Optional[str] = None):
                     continue
         return None
 
-    if _CFFI_SESSION is None:
-        with _SESSION_LOCK:
-            if _CFFI_SESSION is None:
+    # Per-thread default session
+    sess = getattr(_thread_local, 'cffi_session', None)
+    if sess is None:
+        try:
+            from curl_cffi import requests as cffi_requests
+            for imp in ("chrome104", "chrome100", "chrome107", "chrome110", "chrome120", "chrome124", "chrome131"):
                 try:
-                    from curl_cffi import requests as cffi_requests
-                    # Try newest Chrome impersonation, fall back gracefully
-                    for imp in ("chrome104", "chrome100", "chrome107", "chrome110", "chrome120", "chrome124", "chrome131"):
-                        try:
-                            _CFFI_SESSION = cffi_requests.Session(impersonate=imp)
-                            break
-                        except Exception:
-                            continue
-                except ImportError:
-                    pass
-    return _CFFI_SESSION
+                    sess = cffi_requests.Session(impersonate=imp)
+                    _thread_local.cffi_session = sess
+                    break
+                except Exception:
+                    continue
+        except ImportError:
+            pass
+    return sess
 
 
 def _get_cloudscraper():
-    global _CLOUD_SCRAPER
-    if _CLOUD_SCRAPER is None:
-        with _SESSION_LOCK:
-            if _CLOUD_SCRAPER is None:
-                try:
-                    import cloudscraper
-                    _CLOUD_SCRAPER = cloudscraper.create_scraper(
-                        browser={"browser": "chrome", "platform": "windows", "mobile": False}
-                    )
-                except ImportError:
-                    pass
-    return _CLOUD_SCRAPER
+    scraper = getattr(_thread_local, 'cloud_scraper', None)
+    if scraper is None:
+        try:
+            import cloudscraper
+            scraper = cloudscraper.create_scraper(
+                browser={"browser": "chrome", "platform": "windows", "mobile": False}
+            )
+            _thread_local.cloud_scraper = scraper
+        except ImportError:
+            pass
+    return scraper
 
 
 def _get_req_session():
-    global _REQ_SESSION
-    if _REQ_SESSION is None:
-        with _SESSION_LOCK:
-            if _REQ_SESSION is None:
-                import requests
-                _REQ_SESSION = requests.Session()
-    return _REQ_SESSION
+    sess = getattr(_thread_local, 'req_session', None)
+    if sess is None:
+        import requests
+        sess = requests.Session()
+        _thread_local.req_session = sess
+    return sess
 
 
 # ══════════════════════════════════════════════════════════════════════════

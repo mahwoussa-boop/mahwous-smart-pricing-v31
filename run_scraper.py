@@ -11,24 +11,8 @@ import warnings
 from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
 warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 
-# Load competitors
-with open("data/competitors_list_v30.json", encoding="utf-8") as f:
-    comps = json.load(f)
-print(f"Found {len(comps)} competitors")
-
-# Register in DB
+# Load competitors — deferred to main() to avoid crash on import
 from utils.db_manager import get_db, init_db, upsert_competitor_products
-init_db()
-
-conn = get_db()
-for c in comps:
-    conn.execute(
-        "INSERT OR IGNORE INTO competitors (name, domain, is_active) VALUES (?, ?, 1)",
-        (c["name"], c["store_url"])
-    )
-conn.commit()
-conn.close()
-print(f"Competitors registered in DB")
 
 # ── Sitemap fetching ──
 from scrapers.anti_ban import try_curl_cffi, try_httpx
@@ -116,6 +100,23 @@ async def fetch_sitemap(session, sitemap_url, store_name):
 
 
 async def main():
+    # Load competitors (was previously at module level — crashed on import if file missing)
+    with open("data/competitors_list_v30.json", encoding="utf-8") as f:
+        comps = json.load(f)
+    print(f"Found {len(comps)} competitors")
+
+    # Register in DB
+    init_db()
+    conn = get_db()
+    for c in comps:
+        conn.execute(
+            "INSERT OR IGNORE INTO competitors (name, domain, is_active) VALUES (?, ?, 1)",
+            (c["name"], c["store_url"])
+        )
+    conn.commit()
+    conn.close()
+    print("Competitors registered in DB")
+
     connector = aiohttp.TCPConnector(limit=20, ssl=False)
     async with aiohttp.ClientSession(connector=connector) as session:
         
